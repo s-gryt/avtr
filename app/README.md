@@ -6,28 +6,30 @@ head and hair move as part of the picture.
 
 ```
 camera → OpenCV YuNet (detect) + SFace (recognize) → anonymous runtime registry (User 1, User 2, …) → presence/session state machine
-Chrome mic → Web Speech API (STT) → POST /chat → Ollama (native tool calling, reasoning)
-→ mock Home API (/home/api/v1/actions) mutates device state + logs the Home Assistant request it would send
+Chrome mic (always on, echo-cancelled) → AudioWorklet VAD → 16 kHz WAV → POST /transcribe → host Ollama audio model → POST /chat → host Ollama chat model (native tool calling)
+→ mock `home_action(device, action, value)`: nothing is controlled, the action is only logged (server log, event stream, browser console)
 → Kokoro TTS (ONNX, CPU) → per-20 ms lip features → NDJSON stream → WebGL mesh avatar, lips driven by the audio clock
 ```
 
-Run it: see [docs/DOCKER.md](../docs/DOCKER.md) (`docker compose up --build` + a native Ollama) or, for development,
-`cd app && uv sync && uv run uvicorn main:app --port 8000`, then open http://localhost:8000 in **Chrome**.
+Run it only in Docker: see [docs/DOCKER.md](../docs/DOCKER.md). Ollama runs natively on the host and serves the chat and audio models; open http://localhost:8000 in **Chrome**.
 
 ## What the testing page does
 
 - **Start mirror** asks for camera + mic. A dim "mirror" veil lifts when someone approaches. She greets once per visit
-  (one sentence + one offer as a question), then listens. She goes back to a mirror when nobody is there.
-- **Users are anonymous.** There are no names. A face that engages the mirror is remembered as **User 1**, the next
-  new face as **User 2**, and so on (auto-remember, switchable). **Snapshot my face** registers explicitly. Only SFace
+  (one sentence + one offer as a question), then waits for one visitor turn before responding. She goes back to a mirror when nobody is there.
+- **Users are anonymous.** There are no names. New faces stay guests by default; **Snapshot my face** explicitly registers
+  a household user as **User 1**, the next registered person as **User 2**, and so on. Optional auto-remember can be enabled.
+  Only SFace
   embeddings are kept, in process memory, until **Forget all users** or a restart. Everyone else is a *guest* (default
   user): general welcome, no label, no private household info.
-- **Scenarios** are deterministic conversation flows. Each step shows what to say, what tool call is expected, what the
-  model actually called, what she said, and the **Home Assistant request** the mock bridge would send
-  (`POST /api/services/media_player/play_media …`). Home Assistant itself is out of scope: requests are logged, not sent.
+- **Conversation**: just talk. She answers general questions (facts, advice, jokes) and acts on requests ("play Frank
+  Sinatra", "pause the music", "dim the lights") by calling the mock `home_action` tool. Mock actions show up as
+  `[mock action]` in the browser console, as `action.mock` in the event stream and as ⚙ lines in the chat.
 - **Identity dropdown + Simulate approach** work without a camera (forces guest / User N through the same session logic).
-- **Interrupt**: speaking into the mic, typing, or the button stops audio in ~1 ms and the face stops with it.
-- **Event stream** is everything the backend emits, as a Home-API bridge would see it.
+- **Interrupt**: speak over her (voice barge-in), type, or press the button — audio stops immediately and she listens.
+  The mic stays open while she speaks; Chrome echo cancellation plus an adaptive echo threshold keep her own voice from
+  triggering it (use headphones if the room is very reverberant). Only one tab runs the mirror at a time.
+- **Event stream** is everything the backend emits.
 
 ## Avatar rig (what moves)
 
@@ -40,29 +42,33 @@ In the browser, every frame: lips from the audio clock (fast attack, slower rele
 face, upper-lip lift, corner width from spectral brightness, smile/cheeks, brows, blinks (150–220 ms, 2–7 s apart,
 occasional double), micro-saccades, gaze that tracks the detected face and compensates head turns, breathing, a
 slow drift so she is never frozen, listening tilt/nod, a thinking glance away, speech-energy head emphasis. All targets
-are smoothed with time-based exponential filters, so motion never jumps. The oral cavity (shaded individual teeth, lip
-shadow, tongue, corner darkening) is drawn under the warped lips on a 2D canvas.
+are smoothed with time-based exponential filters, so motion never jumps. Head rotation uses compressed depth and small
+clamped angles so face, hair and skull move as one rigid piece. The lips part as a lens (full at the center, closed at
+the corners) and the whole lower lip rides the jaw, so it keeps its shape. The mouth interior (dark cavity, a soft
+upper-teeth hint under the lip, tongue, lip shadow) is drawn anti-aliased under the warped lips on a 2D canvas; at rest
+the untouched portrait shows through.
 
 ## Models
 
 | Role | Default | Notes |
 |---|---|---|
-| Brain | Ollama `gemma4:e4b-it-q4_K_M` | native tool calling, `think:false`; `MODEL=` to switch, see docs/DOCKER.md |
+| Brain | Ollama `gemma4:e4b-it-q4_K_M` | native tool calling; `MODEL=` to switch |
+| Speech input | Ollama `gemma4:e4b-it-q4_K_M` | audio-capable model; `STT_MODEL=` switches independently |
 | Voice | Kokoro int8 ONNX, `af_heart` | CPU, RTF ≈ 0.4 on M1; `VOICE=af_bella|bf_emma|…` |
 | Vision | OpenCV Zoo YuNet + SFace | CPU, 40–200 ms per frame |
-| STT | Chrome Web Speech API | the only thing that leaves the machine (audio → Google); swap for local Whisper later |
+| Avatar | WebGL portrait mesh | no Ollama model; landmarks drive face/head deformation and audio-clock lip motion |
 
 ## Endpoints
 
-- `POST /chat` NDJSON: `token` · `speech` (pcm16 + lip features) · `tool_call` (with reasoning) · `tool_result` (with `ha` request) · `done` (metrics)
-- `POST /vision/frame` · `POST /vision/simulate` · `POST /users/snapshot` · `GET /users` · `POST /users/reset` · `POST /users/forget` · `POST /users/auto`
-- `POST /home/api/v1/actions` (SIMULATED) · `GET /home/api/v1/state` · `GET /home/api/v1/events` (SSE) · `GET /metrics` · `GET /scenarios`
-- Events: presence.detected/left, session.started/ended, identity.confirmed/unknown, user.registered/forgotten, users.reset, greeting.suppressed,
-  turn.user, llm.first_token, speech.filler, tool_call.requested, **ha.request**, device.state_changed, speech.interrupted, turn.cancelled,
-  policy.unverified_claim/missing_tool_call/repaired, turn.assistant, scenario.start/pass/fail/end
+- `POST /transcribe` WAV bytes → host Ollama `/v1/audio/transcriptions` → `{"text"}`; `POST /chat` NDJSON: `token` · `speech` (pcm16 + lip features) · `tool_call` · `tool_result` · `done` (metrics)
+- `POST /interrupt` · `POST /reset` · `POST /vision/frame` · `POST /vision/simulate` · `POST /users/snapshot` · `POST /users/simulate` · `GET /users` · `POST /users/reset` · `POST /users/forget` · `POST /users/auto`
+- `GET /events` (SSE) · `GET /metrics`
+- Events: presence.detected/left, session.started/ended/reset, identity.confirmed, user.registered/already_registered/forgotten, users.reset/auto_remember,
+  speech.transcribed/transcription_error, turn.user, llm.first_token/text_tool_call/empty_round, speech.filler, **action.mock**, action.failed,
+  speech.interrupted, turn.cancelled, policy.unverified_claim/repaired/repair_failed, turn.assistant, turn.error
 
 ## Not in scope (POC)
 
-All device actions are simulated and labelled. No Sonos/Lutron/Home Assistant traffic. No persistence of faces or
+All home actions are mocked and only logged. No Sonos/Lutron/Home Assistant traffic. No persistence of faces or
 preferences across restarts (by design for the POC). The physical mirror, glass, microphone array and arrival awareness
 are later phases.

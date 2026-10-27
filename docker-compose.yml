@@ -8,6 +8,7 @@ services:
     environment:
       OLLAMA: ${OLLAMA:-http://host.docker.internal:11434}
       MODEL: ${MODEL:-gemma4:e4b-it-q4_K_M}
+      STT_MODEL: ${STT_MODEL:-gemma4:e4b-it-q4_K_M}
       VOICE: ${VOICE:-af_heart}
     extra_hosts:
       - "host.docker.internal:host-gateway"  # needed on Linux; harmless on macOS/Windows

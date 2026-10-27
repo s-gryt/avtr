@@ -3,7 +3,7 @@
 :root{--bg:#07070a;--panel:#111118;--line:#23232e;--txt:#e8e8ee;--dim:#8a8a99;--acc:#6fd3ff;--ok:#7ef0a0;--warn:#ffd36f;--err:#ff7d7d;--vio:#c08fff}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,system-ui,sans-serif;display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;padding:16px;height:100vh;overflow:hidden}
-#stage{position:relative;height:min(calc(100vh - 140px),924px);aspect-ratio:941/1672;flex-shrink:0;border-radius:22px;overflow:hidden;background:#000;box-shadow:0 10px 60px #000c}
+#stage{position:relative;height:min(calc(100vh - 140px),924px);aspect-ratio:941/1672;width:auto;align-self:flex-start;flex-shrink:0;border-radius:22px;overflow:hidden;background:#000;box-shadow:0 10px 60px #000c}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #veil{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 30%,#0b0d12 0%,#05060a 70%);opacity:.94;transition:opacity 1.6s ease;pointer-events:none}
 #veil::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,#ffffff00 40%,#ffffff10 50%,#ffffff00 60%)}
@@ -14,8 +14,6 @@ body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,
 #stage #cam{position:absolute;inset:auto;left:12px;bottom:12px;width:150px;height:112px;border-radius:10px;border:1px solid #ffffff33;background:#000;object-fit:cover}
 #camlbl{position:absolute;left:12px;bottom:128px;font:11px ui-monospace,monospace;color:#cfd;background:#0008;padding:2px 6px;border-radius:6px}
 #status{position:absolute;left:0;right:0;bottom:0;text-align:center;font:600 13px system-ui;letter-spacing:.06em;text-transform:uppercase;color:#fffc;padding:10px;background:linear-gradient(#0000,#0008);pointer-events:none}
-#card{position:absolute;right:14px;top:14px;width:230px;background:#0e0e14e6;border:1px solid var(--line);border-radius:14px;padding:12px 14px;backdrop-filter:blur(8px);display:none}
-#card h4{margin:0 0 6px;font-size:13px;color:var(--acc)}#card div{font-size:13px;color:#ddd}
 #left{display:flex;flex-direction:column;gap:10px;min-height:0;width:fit-content;max-width:560px}
 #controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 button{font:13px system-ui;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:#1a1a24;color:var(--txt);cursor:pointer}
@@ -28,14 +26,6 @@ select,input.sm{font:13px system-ui;padding:7px;border-radius:10px;background:#1
 #vis{display:flex;gap:14px;font:12px ui-monospace,monospace;color:var(--dim);flex-wrap:wrap;align-items:center}#vis b{color:var(--txt)}#vis .on{color:var(--ok)}
 #users{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .user{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12.5px}.user b{color:var(--acc)}.user small{display:block;color:var(--dim)}
-#rooms{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.room{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}
-.room b{display:block;text-transform:capitalize;margin-bottom:4px}
-.room .l{color:var(--warn)}.room .m{color:var(--ok)}.room .off{color:var(--dim)}
-#scen{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.sc{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:4px}
-.sc b{color:var(--txt)}.sc i{color:var(--dim);font-style:normal;font-size:11.5px}.sc .say{color:#9ccfff;font-size:11.5px}
-.sc .res{font:11px ui-monospace,monospace;white-space:pre-wrap;color:#b8b8c8}.sc .pass{color:var(--ok)}.sc .fail{color:var(--err)}.sc .ha{color:var(--warn)}
 #chat{overflow:auto;height:170px;font-size:14px}
 #chat p{margin:5px 0}.u{color:#9ccfff}.u::before{content:"you  ";color:var(--dim);font-size:11px}
 .a{color:#ffe2b8}.a::before{content:"aria ";color:var(--dim);font-size:11px}
@@ -53,7 +43,6 @@ small{color:var(--dim)} label.sw{font-size:12px;color:var(--dim);display:flex;ga
 <div id=stage>
   <canvas id=cav></canvas><canvas id=gl></canvas><div id=veil></div><div id=ring></div>
   <canvas id=cam width=320 height=240></canvas><div id=camlbl>camera off</div>
-  <div id=card><h4></h4><div></div></div>
   <div id=status>mirror</div>
 </div>
 <div id=controls>
@@ -63,19 +52,17 @@ small{color:var(--dim)} label.sw{font-size:12px;color:var(--dim);display:flex;ga
   <button id=approach title="no camera? fake an approach">Simulate approach</button>
   <button id=reset title="forget the conversation and current visit">↺ conversation</button>
 </div>
-<small>Chrome. Headphones recommended (otherwise she hears herself). Faces and preferences stay in this process's memory only; speech-to-text uses Chrome's Web Speech API.</small>
+<small>Chrome. Just talk — speak over her any time to interrupt. Speech is transcribed locally by Ollama. Face embeddings and preferences stay in process memory only and are cleared when the container restarts.</small>
 </div>
 <div id=side>
   <div class=panel><h3>Vision · presence, identity, users <span>YuNet + SFace · local · runtime only</span></h3>
     <div id=vis>present <b id=v_p>no</b> identity <b id=v_i>—</b> match <b id=v_c>—</b> session <b id=v_s>—</b> faces <b id=v_f>0</b> frame <b id=v_ms>—</b>
       <button class=sm id=snap title="register the face in front of the camera as the next User N">📷 Snapshot my face</button>
-      <label class=sw><input type=checkbox id=auto checked> auto-remember on approach</label>
+      <label class=sw><input type=checkbox id=auto> auto-remember on approach</label>
       <button class=sm id=ureset>Forget all users</button></div>
     <div id=users><span class=sys>no users registered — approach the camera or press Snapshot</span></div></div>
-  <div class=panel><h3>Scenarios · how to talk to Aria <span>deterministic flows · expected vs actual tool calls · Home Assistant request logged</span></h3><div id=scen></div></div>
-  <div class=panel><h3>Home API · device state <span>SIMULATED — nothing leaves this machine</span></h3><div id=rooms></div></div>
-  <div class=panel><h3>Conversation</h3><div id=chat></div><input id=txt placeholder="…or type here (Enter). Typing also interrupts."></div>
-  <div class=panel><h3>Home API · event stream <span>GET /home/api/v1/events (SSE)</span></h3><div id=events></div><div id=metrics style="margin-top:8px"></div></div>
+  <div class=panel><h3>Conversation</h3><div id=chat></div><input id=txt placeholder="…or type here (Enter). Typing also interrupts."><div id=mic class=sys>mic off</div></div>
+  <div class=panel><h3>Event stream <span>mock actions are only logged here and in the browser console</span></h3><div id=events></div><div id=metrics style="margin-top:8px"></div></div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
@@ -87,10 +74,10 @@ const IMG=new Image(); IMG.src='avatar.png';
 let MESH=null, P=null, N=0, NF=0;
 fetch('avatar_mesh.json').then(r=>r.json()).then(m=>{MESH=m;initMesh();});
 const stage=$('#stage'), glc=$('#gl'), cavc=$('#cav'), cav=cavc.getContext('2d');
-const gl=glc.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:true});
+const gl=glc.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:true});   // premultiplied: MSAA edges against the transparent mouth hole would otherwise render as a dark fringe
 let prog, bufPos, bufUV, tex, uM, verts, uvs, NTRI=0;
-const LOWER_LIP=[146,91,181,84,17,314,405,321,375,95,88,178,87,14,317,402,318,324], UPPER_LIP=[185,40,39,37,0,267,269,270,409,191,80,81,82,13,312,311,310,415];
-const CORNERS=[61,291,78,308];
+const LOWER_LIP=[146,91,181,84,17,314,405,321,375,95,88,178,87,14,317,402,318,324, 77,90,180,85,16,315,404,320,307, 96,89,179,86,15,316,403,319,325], UPPER_LIP=[185,40,39,37,0,267,269,270,409,191,80,81,82,13,312,311,310,415];   // lower lip: all four mesh rings, so it moves as one piece
+const CORNERS=[61,291,78,308,62,292,76,306];
 const BROWS=[70,63,105,66,107,46,53,52,65,55,300,293,334,296,336,276,283,282,295,285], BROWS_IN=[107,66,55,336,296,285];
 const LIDR_U=[173,157,158,159,160,161,246], LIDR_L=[155,154,153,145,144,163,7], CRS_R=[190,56,28,27,29,30,247];
 const LIDL_U=[398,384,385,386,387,388,466], LIDL_L=[382,381,380,374,373,390,249], CRS_L=[414,286,258,257,259,260,467];
@@ -116,11 +103,12 @@ function initMesh(){
     const [u,v]=F.uv[i], [cu,cv]=F.cuv[i];
     F.w.head[i]=m.head[i]; F.w.z[i]=P[i][2];
     let wj=0;   // jaw: lower lip + chin + under-chin, fading toward the neck and sideways
-    if(isLower(i)) wj=1; else if(isCorner(i)) wj=0.35; else if(isUpper(i)) wj=0;
-    else if(v>0){ const wv=v<=chinV+12?sstep(0,3,v):1-sstep(chinV+12,chinV+70,v); const wu=1-sstep(F.mw*1.25,F.mw*2.4,Math.abs(u)); wj=wv*wu; }   // everything below the lip line rides the jaw, so the lower lip keeps its thickness
+    const lens=0.1+0.9*Math.pow(1-Math.pow(clamp(Math.abs(u)/F.mw,0,1),2),0.9);   // lips part as a lens: full at the center, closing smoothly into the corners
+    if(isLower(i)) wj=lens; else if(isCorner(i)) wj=0.5*lens; else if(isUpper(i)) wj=0;
+    else if(v>0){ const wv=v<=chinV+12?sstep(0,3,v):1-sstep(chinV+12,chinV+70,v); const wu=1-sstep(F.mw*1.25,F.mw*2.4,Math.abs(u)); wj=wv*wu; if(v<F.uv[17][1]) wj=Math.min(wj,lens); }   // everything below the lip line rides the jaw, so the lower lip keeps its thickness
     F.w.jaw[i]=wj;
     const inner=i>=80&&i<=82||i===13||i>=310&&i<=312||i===415||i===191, mid=isUpperMid(i);
-    F.w.lift[i]=isUpper(i)?(inner?1:0.6):mid?0.82:(v<0&&v>-24&&Math.abs(u)<F.mw*1.1&&i<NF?0.3*(1-Math.abs(u)/(F.mw*1.1)):0);
+    F.w.lift[i]=(isUpper(i)?(inner?1:0.6):mid?0.82:(v<0&&v>-24&&Math.abs(u)<F.mw*1.1&&i<NF?0.3*(1-Math.abs(u)/(F.mw*1.1)):0))*(0.35+0.65*lens);
     const dc=Math.min(Math.hypot(u-F.uv[61][0],v-F.uv[61][1]),Math.hypot(u-F.uv[291][0],v-F.uv[291][1]));
     F.w.corner[i]=i<NF?Math.exp(-((dc/(F.mw*0.75))**2)):0;
     F.w.cheek[i]=(v<2&&Math.abs(u)>F.mw*0.5&&i<NF)?Math.exp(-((dc/(F.mw*1.5))**2)):0;
@@ -141,20 +129,20 @@ function initMesh(){
   tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,tex);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-  const up=()=>{gl.bindTexture(gl.TEXTURE_2D,tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,IMG);};
+  const up=()=>{gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,IMG);};
   if(IMG.complete&&IMG.naturalWidth) up(); else IMG.onload=up;
-  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 }
 // ───────── animation state: A = current (smoothed), targets computed every frame from behaviour ─────────
 const A={open:0,wide:0.3,env:0,yaw:0,pitch:0,roll:0,blink:0.9,smile:0.1,brow:0,browIn:0,gazeX:0,gazeY:0,bob:0,sway:0,breath:0,nod:0};
 let state='asleep', user={x:0.5,y:0.45,seen:-1e9}, nextBlink=2000, blinkStart=-1, blinkDur=170, nextSacc=0, sacc={x:0,y:0}, stateSince=0, lookAway={x:0,y:0,until:0,next:4000};
 function deform(){
   const w=F.w, pts=P, R=F.right, D=F.down;
-  const open=A.open, jaw=open*F.mw*0.6, lift=open*5+A.smile*1.5, wide=(A.wide-0.4)*F.mw*0.28, smile=A.smile, brow=A.brow*F.faceH*0.028, browIn=A.browIn*F.faceH*0.02, blink=A.blink;
+  const open=A.open, jaw=open*F.mw*0.34, lift=open*2.6+A.smile*0.6, wide=(A.wide-0.4)*F.mw*0.1, smile=A.smile, brow=A.brow*F.faceH*0.028, browIn=A.browIn*F.faceH*0.02, blink=A.blink;
   const cy=Math.cos(A.yaw), sy=Math.sin(A.yaw), cp=Math.cos(A.pitch), sp=Math.sin(A.pitch), cr=Math.cos(A.roll), sr=Math.sin(A.roll);
   const pv=F.pivot;
   const X=new Float32Array(N*2), lid=new Float32Array(N*2);
-  const squint=smile*0.14;   // cheeks push the lower lid up when she smiles
+  const squint=smile*0.08;   // cheeks push the lower lid up when she smiles
   for(const [u,l,c] of F.lids){ const dx=pts[l][0]-pts[u][0], dy=pts[l][1]-pts[u][1];
     const up=blink*(0.9-squint), lo=blink*0.1+squint;   // up+lo <= 1: the lids meet, never cross (crossed triangles render inside-out)
     lid[u*2]+=dx*up; lid[u*2+1]+=dy*up; lid[c*2]+=dx*up*0.62; lid[c*2+1]+=dy*up*0.62;
@@ -165,16 +153,16 @@ function deform(){
     dv+=jaw*w.jaw[i]; dv-=lift*w.lift[i];
     const uu=F.uv[i][0], sg=Math.sign(uu);
     du+=sg*wide*w.corner[i]*(open>0.05?1:0.3);
-    du+=sg*smile*F.mw*0.14*w.corner[i]; dv-=smile*F.mw*0.17*w.corner[i]; dv-=smile*F.mw*0.1*w.cheek[i];
+    du+=sg*smile*F.mw*0.035*w.corner[i]; dv-=smile*F.mw*0.05*w.corner[i]; dv-=smile*F.mw*0.025*w.cheek[i];   // the portrait already smiles: only a hint more
     dv-=brow*w.brow[i]; dv+=browIn*w.browIn[i]; du-=sg*browIn*0.6*w.browIn[i];
     x+=R[0]*du+D[0]*dv; y+=R[1]*du+D[1]*dv;
     const wh=w.head[i];
     if(wh>0){
-      const lx=(x-pv[0])*R[0]+(y-pv[1])*R[1], ly=(x-pv[0])*D[0]+(y-pv[1])*D[1], lz=z;
+      const lx=(x-pv[0])*R[0]+(y-pv[1])*R[1], ly=(x-pv[0])*D[0]+(y-pv[1])*D[1], lz=z*0.22;
       let x1=lx*cy+lz*sy, z1=-lx*sy+lz*cy, y1=ly;
       let y2=y1*cp-z1*sp, z2=y1*sp+z1*cp, x2=x1;
       let x3=x2*cr-y2*sr, y3=x2*sr+y2*cr;
-      y3+=A.pitch*F.faceH*0.10; x3+=A.yaw*F.faceH*0.06;   // a real neck translates the head a little as it turns
+      y3+=A.pitch*F.faceH*0.05; x3+=A.yaw*F.faceH*0.04;   // a real neck translates the head a little as it turns
       const nx=pv[0]+R[0]*x3+D[0]*y3, ny=pv[1]+R[1]*x3+D[1]*y3;
       x=lerp(x,nx,wh); y=lerp(y,ny,wh);
     }
@@ -187,43 +175,47 @@ function resize(){ dpr=Math.min(2,devicePixelRatio||1); const r=stage.getBoundin
 addEventListener('resize',resize); new ResizeObserver(resize).observe(stage); resize();
 function globalMatrix(){ const cx=MESH.w/2, cy=MESH.h*0.95, s=1.0+A.breath*0.003+0.02, a=A.sway, ca=Math.cos(a), sa=Math.sin(a);
   return {a:ca*s,b:sa*s,c:-sa*s,d:ca*s,e:cx-(ca*s*cx-sa*s*(cy-A.bob)),f:cy-(sa*s*cx+ca*s*(cy-A.bob))}; }
+const mouthc=document.createElement('canvas'), mc=mouthc.getContext('2d');
 function drawCavity(X,G){
   cav.setTransform(1,0,0,1,0,0); cav.clearRect(0,0,cavc.width,cavc.height);
-  if(A.open<0.02) return;
-  const sx=cavc.width/MESH.w, sy=cavc.height/MESH.h; cav.setTransform(sx*G.a,sy*G.b,sx*G.c,sy*G.d,sx*G.e,sy*G.f);   // same affine as the GL layer, per axis
-  const U=MESH.inner_u, Lw=MESH.inner_l;
-  cav.beginPath(); U.forEach((i,k)=>k?cav.lineTo(X[i*2],X[i*2+1]):cav.moveTo(X[i*2],X[i*2+1])); for(let k=Lw.length-1;k>=0;k--) cav.lineTo(X[Lw[k]*2],X[Lw[k]*2+1]); cav.closePath();
-  cav.save(); cav.clip();
-  const top=[X[13*2],X[13*2+1]], bot=[X[14*2],X[14*2+1]]; const gap=Math.hypot(bot[0]-top[0],bot[1]-top[1]);
-  const R=F.right, D=F.down, mw=F.mw;
-  const loc=(o,u,v)=>[o[0]+R[0]*u+D[0]*v,o[1]+R[1]*u+D[1]*v];
-  const quad=(o,u0,v0,w,h)=>{ const p=[loc(o,u0,v0),loc(o,u0+w,v0),loc(o,u0+w,v0+h),loc(o,u0,v0+h)]; cav.beginPath(); cav.moveTo(p[0][0],p[0][1]); for(let k=1;k<4;k++) cav.lineTo(p[k][0],p[k][1]); cav.closePath(); };
-  // dark oral cavity
-  const g=cav.createLinearGradient(top[0],top[1],bot[0],bot[1]); g.addColorStop(0,'#1c0608'); g.addColorStop(0.5,'#3a1116'); g.addColorStop(1,'#140405');
-  cav.fillStyle=g; cav.fillRect(top[0]-mw*2,top[1]-mw*2,mw*4,mw*4);
-  // upper teeth: individual, ivory in shadow, darker toward the corners and under the lip
-  const th=Math.min(mw*0.26,gap*0.62), tw=mw*1.6, nT=6, ww=tw/nT;
-  for(let k=0;k<nT;k++){ const u0=-tw/2+k*ww, dark=1-0.35*Math.abs(k-(nT-1)/2)/((nT-1)/2);
-    const tg=cav.createLinearGradient(...loc(top,0,-2),...loc(top,0,th)); const v=Math.round(222*dark), v2=Math.round(170*dark);
-    tg.addColorStop(0,`rgb(${v},${v-8},${v-20})`); tg.addColorStop(0.75,`rgb(${v-18},${v-28},${v-42})`); tg.addColorStop(1,`rgb(${v2},${v2-10},${v2-22})`);
-    cav.fillStyle=tg; const h=th*(k===0||k===nT-1?0.82:k===1||k===nT-2?0.92:1);
-    const p0=loc(top,u0+0.5,-2), p1=loc(top,u0+ww-0.5,-2), p2=loc(top,u0+ww-0.5,h-ww*0.45), p3=loc(top,u0+ww/2,h), p4=loc(top,u0+0.5,h-ww*0.45);
-    cav.beginPath(); cav.moveTo(...p0); cav.lineTo(...p1); cav.lineTo(...p2); cav.quadraticCurveTo(...loc(top,u0+ww*0.75,h+1),...p3); cav.quadraticCurveTo(...loc(top,u0+ww*0.25,h+1),...p4); cav.closePath(); cav.fill(); }
-  // lip shadow on the teeth + gum line
-  const sh=cav.createLinearGradient(...loc(top,0,-1),...loc(top,0,th*0.3)); sh.addColorStop(0,'rgba(60,18,22,0.55)'); sh.addColorStop(1,'rgba(60,18,22,0)');
-  cav.fillStyle=sh; quad(top,-tw/2-2,-2,tw+4,th*0.3+2); cav.fill();
-  // tongue: deep in shadow, only its top catches a little light
-  if(gap>12){ const c=loc(bot,0,-gap*0.18); const tg2=cav.createRadialGradient(c[0],c[1]-gap*0.12,2,c[0],c[1],mw*0.7); tg2.addColorStop(0,'#5a2028'); tg2.addColorStop(0.6,'#3a1218'); tg2.addColorStop(1,'#1c0608');
-    cav.fillStyle=tg2; cav.beginPath(); cav.ellipse(c[0],c[1],mw*0.62,Math.max(3,gap*0.22),Math.atan2(R[1],R[0]),0,7); cav.fill(); }
-  // lower teeth, only on a wide-open jaw, dim
-  if(gap>mw*0.5){ cav.fillStyle='rgba(150,138,128,0.55)'; quad(bot,-tw*0.36,-Math.min(6,gap*0.14),tw*0.72,Math.min(6,gap*0.14)); cav.fill(); }
-  // shadow cast by the upper teeth into the cavity
-  const ts2=cav.createLinearGradient(...loc(top,0,th),...loc(top,0,th+gap*0.5)); ts2.addColorStop(0,'rgba(10,2,3,0.85)'); ts2.addColorStop(1,'rgba(10,2,3,0)');
-  cav.fillStyle=ts2; quad(top,-tw/2-4,th,tw+8,gap*0.5+2); cav.fill();
-  // corner darkening
-  const vg=cav.createLinearGradient(...loc(top,-mw,0),...loc(top,mw,0)); vg.addColorStop(0,'rgba(20,5,6,0.9)'); vg.addColorStop(0.22,'rgba(20,5,6,0)'); vg.addColorStop(0.78,'rgba(20,5,6,0)'); vg.addColorStop(1,'rgba(20,5,6,0.9)');
-  cav.fillStyle=vg; cav.fillRect(top[0]-mw*2,top[1]-mw*2,mw*4,mw*4);
-  cav.restore();
+  const sx=cavc.width/MESH.w, sy=cavc.height/MESH.h, T=[sx*G.a,sy*G.b,sx*G.c,sy*G.d,sx*G.e,sy*G.f];   // same affine as the GL layer
+  const U=MESH.inner_u, Lw=MESH.inner_l, pt=i=>[X[i*2],X[i*2+1]], D=F.down, R=F.right, mw=F.mw;
+  const top=pt(13), bot=pt(14), gap=Math.hypot(bot[0]-top[0],bot[1]-top[1]), mid=[(top[0]+bot[0])/2,(top[1]+bot[1])/2];
+  // underlay: the untouched portrait around the mouth, moved with the lips, so a closed mouth looks exactly like the picture
+  const o=P[13], dx=top[0]-o[0], dy=top[1]-o[1], r=mw*1.8;
+  cav.setTransform(...T); cav.drawImage(IMG,o[0]-r,o[1]-r,2*r,2*r,o[0]-r+dx,o[1]-r+dy,2*r,2*r);
+  const a=sstep(0.02,0.12,A.open); if(a<=0) return;
+  // cavity layer drawn offscreen with anti-aliased fills; everything after the mouth shape is painted source-atop it
+  if(mouthc.width!==cavc.width||mouthc.height!==cavc.height){ mouthc.width=cavc.width; mouthc.height=cavc.height; }
+  mc.setTransform(1,0,0,1,0,0); mc.clearRect(0,0,mouthc.width,mouthc.height); mc.setTransform(...T);
+  const mouth=()=>{ mc.beginPath(); U.forEach((i,k)=>k?mc.lineTo(...pt(i)):mc.moveTo(...pt(i))); for(let k=Lw.length-1;k>=0;k--) mc.lineTo(...pt(Lw[k])); mc.closePath(); };
+  const g=mc.createRadialGradient(mid[0],mid[1]+gap*0.2,1,mid[0],mid[1],mw*1.05); g.addColorStop(0,'#4a1d21'); g.addColorStop(0.5,'#2e1014'); g.addColorStop(1,'#1e090b');
+  mouth(); mc.fillStyle=g; mc.fill();
+  mc.globalCompositeOperation='source-atop';
+  // tongue: low and soft
+  if(gap>5){ const c=[bot[0]-D[0]*gap*0.1,bot[1]-D[1]*gap*0.1], t=mc.createRadialGradient(c[0],c[1]-gap*0.1,1,c[0],c[1],mw*0.55);
+    t.addColorStop(0,'rgba(128,58,62,0.5)'); t.addColorStop(1,'rgba(70,24,28,0)'); mc.fillStyle=t;
+    mc.beginPath(); mc.ellipse(c[0],c[1],mw*0.5,Math.max(2,gap*0.32),Math.atan2(R[1],R[0]),0,7); mc.fill(); }
+  // upper teeth: one soft row under the upper lip, only across the front (canines fade into shadow), never brighter than the skin
+  const row=(idx,dir,h,alpha,c0,c1)=>{ const n=idx.length; mc.beginPath();
+    const off=k=>{ const x=k/(n-1)*2-1, w=Math.max(0,1-Math.pow(Math.abs(x)/0.78,2.2)); return w; };
+    idx.forEach((i,k)=>{const p=pt(i); k?mc.lineTo(p[0]-D[0]*dir*2,p[1]-D[1]*dir*2):mc.moveTo(p[0]-D[0]*dir*2,p[1]-D[1]*dir*2);});
+    for(let k=n-1;k>=0;k--){ const p=pt(idx[k]), w=off(k); mc.lineTo(p[0]+D[0]*dir*h*w,p[1]+D[1]*dir*h*w); }
+    mc.closePath(); const s0=pt(13), s1=[s0[0]+D[0]*dir*h,s0[1]+D[1]*dir*h], gr=mc.createLinearGradient(s0[0],s0[1],s1[0],s1[1]);
+    gr.addColorStop(0,c0); gr.addColorStop(1,c1); mc.globalAlpha=alpha; mc.fillStyle=gr; mc.fill(); mc.globalAlpha=1; };
+  mc.filter=`blur(${Math.max(0.5,mw*0.01)}px)`;
+  const th=Math.min(gap*0.4,mw*0.12);
+  if(th>0.8) row(U,1,th,clamp((gap-2)/8,0,0.85),'rgb(118,104,98)','rgb(196,186,176)');
+  if(gap>mw*0.32) row(Lw,-1,Math.min(gap*0.16,mw*0.06),0.3,'rgb(104,92,86)','rgb(150,140,132)');
+  mc.filter='none';
+  // shadow under the upper lip + dark corners keep the teeth inside the mouth
+  const sh=mc.createLinearGradient(top[0],top[1],top[0]+D[0]*(th+2)*1.3,top[1]+D[1]*(th+2)*1.3); sh.addColorStop(0,'rgba(36,10,12,0.6)'); sh.addColorStop(1,'rgba(36,10,12,0)');
+  mc.fillStyle=sh; mc.fillRect(mid[0]-mw*2,mid[1]-mw*2,mw*4,mw*4);
+  const cl=pt(78), cr=pt(308), vg=mc.createLinearGradient(cl[0],cl[1],cr[0],cr[1]);
+  vg.addColorStop(0,'rgba(30,9,11,0.55)'); vg.addColorStop(0.22,'rgba(30,9,11,0)'); vg.addColorStop(0.78,'rgba(30,9,11,0)'); vg.addColorStop(1,'rgba(30,9,11,0.55)');
+  mc.fillStyle=vg; mc.fillRect(mid[0]-mw*2,mid[1]-mw*2,mw*4,mw*4);
+  mc.globalCompositeOperation='source-over';
+  cav.setTransform(1,0,0,1,0,0); cav.globalAlpha=a; cav.drawImage(mouthc,0,0); cav.globalAlpha=1;
 }
 let last=0;
 function frame(t){
@@ -232,7 +224,7 @@ function frame(t){
   const dt=Math.min(50,t-last)/1000; last=t; const k=r=>1-Math.exp(-r*dt); const ts=t/1000;
   // ── lips from the audio clock: fast attack, slower release; env = slow energy envelope for head/brow emphasis
   const f=currentViseme();
-  A.open+=(f.open-A.open)*k(f.open>A.open?38:16); A.wide+=(f.wide-A.wide)*k(10); A.env+=(A.open-A.env)*k(3.5);
+  A.open+=(f.open-A.open)*k(f.open>A.open?55:28); A.wide+=(f.wide-A.wide)*k(10); A.env+=(A.open-A.env)*k(3.5);
   // ── blink: 150-220 ms, 2-7 s apart, sometimes double; eyes closed while asleep
   if(state==='asleep'){ A.blink+=(0.92-A.blink)*k(3); blinkStart=-1; nextBlink=t+600; }
   else{
@@ -247,20 +239,20 @@ function frame(t){
   if(t>lookAway.next){ lookAway={x:(Math.random()-0.5)*0.35,y:(Math.random()-0.5)*0.12-0.04,until:t+700+Math.random()*1200,next:t+5000+Math.random()*9000}; }
   const away=t<lookAway.until&&state!=='speaking'&&state!=='thinking';
   const lookYaw=userVisible?clamp(-(user.x-0.5)*0.5,-0.22,0.22):0, lookPitch=userVisible?clamp((user.y-0.45)*0.25,-0.1,0.12):0;
-  let ty=lookYaw, tp=lookPitch, tr=0, tsm=0.12, tb=0, tbi=0, gx=sacc.x, gy=sacc.y;
+  let ty=lookYaw*0.6, tp=lookPitch*0.6, tr=0, tsm=0.1, tb=0, tbi=0, gx=sacc.x, gy=sacc.y;
   ty+=noise(ts*0.35,1)*0.035; tp+=noise(ts*0.3,2)*0.02; tr+=noise(ts*0.25,3)*0.02;   // never perfectly still
   if(away){ ty+=lookAway.x; tp+=lookAway.y; gx+=lookAway.x*14; gy+=lookAway.y*20; }
   const since=(t-stateSince)/1000;
   if(state==='asleep'){ ty=noise(ts*0.2,1)*0.02; tp=0.05+noise(ts*0.2,2)*0.01; tsm=0.04; }
   else if(state==='idle'){ tsm=0.1; }
-  else if(state==='listening'){ tr+=0.05; tsm=0.22; tb=0.1;
+  else if(state==='listening'){ tr+=0.03; tsm=0.18; tb=0.1;
     if(userTalking){ A.nod+=(1-A.nod)*k(3); } else A.nod+=(0-A.nod)*k(2);
     tp+=A.nod*Math.sin(ts*2*Math.PI*1.4)*0.022; tb+=A.nod*0.12; tsm+=A.nod*0.08; }
   else if(state==='thinking'){ const w=sstep(0,0.6,since)*(1-sstep(1.6,2.4,since)); ty+=0.14*w; tp-=0.08*w; tr-=0.07*w; gx+=5*w; gy-=3.5*w; tsm=0.06; tbi=0.5*w; tb=-0.05*w; }
-  else if(state==='speaking'){ const e=A.env; tsm=0.16+e*0.08; tb=0.05+e*0.22; tp+=e*0.05+noise(ts*1.1,4)*0.02*e; ty+=noise(ts*0.9,5)*0.04*(0.4+e); tr+=noise(ts*0.7,6)*0.025;
+  else if(state==='speaking'){ const e=A.env; tsm=0.12; tb=0.05+e*0.18; tp+=e*0.03+noise(ts*1.1,4)*0.015*e; ty+=noise(ts*0.9,5)*0.03*(0.4+e); tr+=noise(ts*0.7,6)*0.02;
     if(nowSaying().endsWith('?')&&sayingProgress()>0.6){ tb+=0.3; tr+=0.04; } }
   gx+=-A.yaw*22; gy+=-A.pitch*18;   // eyes stay on the user when the head turns
-  A.yaw+=(clamp(ty,-0.26,0.26)-A.yaw)*k(3.2); A.pitch+=(clamp(tp,-0.14,0.16)-A.pitch)*k(3.5); A.roll+=(clamp(tr,-0.12,0.12)-A.roll)*k(2.5);
+  A.yaw+=(clamp(ty,-0.13,0.13)-A.yaw)*k(3.2); A.pitch+=(clamp(tp,-0.08,0.09)-A.pitch)*k(3.5); A.roll+=(clamp(tr,-0.07,0.07)-A.roll)*k(2.5);
   A.smile+=(tsm-A.smile)*k(2); A.brow+=(tb-A.brow)*k(6); A.browIn+=(tbi-A.browIn)*k(4);
   A.gazeX+=(clamp(gx,-7,7)-A.gazeX)*k(14); A.gazeY+=(clamp(gy,-4,4)-A.gazeY)*k(14);
   A.breath=Math.sin(ts*2*Math.PI/4.2); A.bob=A.breath*1.8+A.env*1.5; A.sway=noise(ts*0.15,7)*0.004;
@@ -290,14 +282,11 @@ const fmtT=ts=>new Date(ts*1000).toTimeString().slice(0,8)+'.'+String(Math.round
 function logEvent(ev){ const {id,ts,type,...rest}=ev; const d=document.createElement('div'); d.className=type;
   d.innerHTML=`<span class=t>${fmtT(ts)}</span> ${esc(type.padEnd(22))} ${esc(JSON.stringify(rest))}`; $('#events').append(d); $('#events').scrollTop=1e9; while($('#events').children.length>400) $('#events').firstChild.remove(); }
 const M={}; function metric(k,v){M[k]=v;$('#metrics').innerHTML=Object.entries(M).map(([k,v])=>`${esc(k)} <b>${esc(v)}</b>`).join(' · ');}
-function renderRooms(rooms){ $('#rooms').innerHTML=Object.entries(rooms).map(([r,s])=>`<div class=room><b>${esc(r)}</b>
-   <div class="l ${s.lights.on?'':'off'}">💡 ${s.lights.on?`on · ${esc(s.lights.brightness)}%${s.lights.scene?' · '+esc(s.lights.scene):''}`:'off'}</div>
-   <div class="m ${s.music.state==='playing'?'':'off'}">♫ ${esc(s.music.state)}${s.music.query?' · '+esc(s.music.query):''} · vol ${esc(s.music.volume)}</div></div>`).join(''); }
-function showCard(c){ $('#card h4').textContent=c.title; $('#card div').innerHTML=c.lines.map(esc).join('<br>'); $('#card').style.display='block'; clearTimeout(showCard.t); showCard.t=setTimeout(()=>$('#card').style.display='none',20000); }
-const es=new EventSource('/home/api/v1/events');
-es.addEventListener('snapshot',e=>{const s=JSON.parse(e.data); renderRooms(s.rooms); s.recent.forEach(logEvent);});
+const es=new EventSource('/events');
+es.addEventListener('snapshot',e=>{JSON.parse(e.data).recent.forEach(logEvent);});
 es.onmessage=e=>{const ev=JSON.parse(e.data); logEvent(ev);
-  if(ev.type==='device.state_changed'){ fetch('/home/api/v1/state').then(r=>r.json()).then(s=>renderRooms(s.rooms)); if(ev.device==='mirror.display') showCard(ev.state.card); }
+  if(ev.type==='action.mock') console.log('%c[mock action]','color:#ffd36f;font-weight:bold',ev.tool,{device:ev.device,action:ev.action,value:ev.value,identity:ev.identity});
+  else console.log('[event]',ev.type,ev);
   if(/^user|^users/.test(ev.type)) refreshUsers(); };
 
 // ═══════════════════════════ speech out: WebAudio + lip track ═══════════════════════════
@@ -344,14 +333,13 @@ async function send(text,opts={}){
       const {value,done}=await rd.read(); if(done)break; if(my!==turn)return summary;
       acc+=dec.decode(value,{stream:true}); const lines=acc.split('\n'); acc=lines.pop();
       for(const l of lines){ if(!l)continue; const j=JSON.parse(l);
-        if(j.type==='token'){ full+=j.text; bubble.textContent=full; }
+        if(j.type==='token'){ full+=j.text; bubble.textContent=full.replace(/`*\b(home_action|remember_preference)\s*\([^)]*\)?`*\s*/g,''); }
         else if(j.type==='speech'){ enqueueSpeech(j); if(j.first_audio_s) metric('first audio',j.first_audio_s+' s'); }
-        else if(j.type==='tool_call'){ summary.tools.push({name:j.name,args:j.args,reason:j.reason}); addChat('sys',`⚙ ${j.name}(${JSON.stringify(j.args)})  — reasoning: ${j.reason}`); }
-        else if(j.type==='tool_result'){ const tc=summary.tools.find(t=>t.name===j.name&&!t.result); if(tc) tc.result=j.result;
-          addChat('sys',`↳ ${j.result.status} · ${j.result.device||j.result.error} · ${j.result.latency_ms} ms · SIMULATED${j.result.ha?' · HA '+j.result.ha.method+' '+j.result.ha.path:''}`); metric('action',j.result.latency_ms+' ms'); }
+        else if(j.type==='tool_call'){ summary.tools.push({name:j.name,args:j.args}); }
+        else if(j.type==='tool_result'){ const r=j.result; addChat('sys',r.status==='ok'?`⚙ mock ${j.name}: ${r.device} · ${r.action}${r.value?' · '+r.value:''}`:`⚙ ${j.name} failed: ${r.error}`); }
         else if(j.type==='llm_done'){ metric('llm',`${j.tok_s} tok/s`); }
         else if(j.type==='error'){ addChat('sys','error: '+j.error); }
-        else if(j.type==='done'){ metric('first token',j.first_token_s+' s'); metric('turn total',j.total_s+' s'); summary.text=j.text||full; summary.done=true; if(!full.trim()) bubble.remove(); }
+        else if(j.type==='done'){ metric('first token',j.first_token_s+' s'); metric('turn total',j.total_s+' s'); summary.text=j.text||full; summary.done=true; if(j.text) bubble.textContent=j.text; else bubble.remove(); }
       }
     }
   }catch(e){ if(e.name!=='AbortError') addChat('sys','error: '+e); }
@@ -360,53 +348,74 @@ async function send(text,opts={}){
 }
 const waitSilence=(maxMs=20000)=>new Promise(res=>{ const t0=performance.now(); const iv=setInterval(()=>{ if((!items.length&&!streaming)||performance.now()-t0>maxMs){clearInterval(iv);res();} },100); });
 
-// ═══════════════════════════ speech in: recognition + VAD (barge-in, echo gate) ═══════════════════════════
-let rec=null, vadStream=null, userTalking=false, lastHot=0, recWanted=false;
-const NOVAD=new URLSearchParams(location.search).has('novad');
-const norm=s=>s.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
-function echoOfAvatar(t){ const n=norm(t), s=norm(items.map(i=>i.text).join(' ')+' '+lastSpokenText); if(!n||!s) return false; const w=n.split(' ').filter(w=>w.length>2); return w.length>0&&w.filter(w=>s.includes(w)).length/w.length>=0.7; }
-function startRec(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){addChat('sys','SpeechRecognition unsupported — use Chrome, or type');return;}
-  if(rec) return;
-  rec=new SR(); rec.continuous=true; rec.interimResults=true; rec.lang='en-US'; recWanted=true;
-  rec.onresult=e=>{
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const r=e.results[i], t=r[0].transcript.trim(); if(!t||NOVAD||scenarioRunning) continue;
-      const userConfirmed=performance.now()-lastHot<1500;
-      const avatarBusy=speaking()||streaming||performance.now()-lastSpeechEnd<600;
-      if(avatarBusy&&(!userConfirmed||echoOfAvatar(t))){ if(r.isFinal) addChat('sys',`(ignored as echo: "${t}")`); continue; }
-      if(!r.isFinal){ if(speaking()||streaming) interrupt('user started speaking'); }
-      else send(t);
+// ═══════════════════════════ speech in: always-on mic → VAD with pre-roll → 16 kHz WAV → /transcribe; talking over Aria interrupts her ═══════════════════════════
+let micCtx=null, micStream=null, userTalking=false, transcribing=0, utterSeq=0, lastSentSeq=0;
+const VAD={floor:0.004, echo:0.01, hot:0, cold:0, voiced:0, rec:null, pre:[], preLen:0};
+const TAP=`class Tap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(1024);this.n=0;}
+process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];if(this.n===1024){this.port.postMessage(this.b.slice());this.n=0;}}}return true;}}
+registerProcessor('tap',Tap);`;
+function micStatus(t){ $('#mic').textContent=t; }
+function stopCapture(){ VAD.rec=null; VAD.hot=0; VAD.cold=0; VAD.voiced=0; if(userTalking){userTalking=false; if(state==='listening') setState('listening');} }
+function onMicChunk(x){
+  const sr=micCtx.sampleRate, ms=x.length/sr*1000; let s=0; for(let i=0;i<x.length;i++) s+=x[i]*x[i]; const rms=Math.sqrt(s/x.length);
+  VAD.pre.push(x); VAD.preLen+=x.length; while(VAD.preLen-VAD.pre[0].length>sr*0.4){ VAD.preLen-=VAD.pre[0].length; VAD.pre.shift(); }
+  if(!awake){ stopCapture(); micStatus('mic on · waiting for someone to approach'); return; }
+  const herVoice=speaking();
+  // her own voice leaks into the mic despite echo cancellation: learn that level while she talks and require clearly more to barge in
+  if(herVoice&&!VAD.rec&&VAD.hot===0) VAD.echo=Math.max(0.006,VAD.echo*0.97+rms*0.03);
+  const thr=herVoice?Math.max(0.03,VAD.echo*3,VAD.floor*6):Math.max(0.012,VAD.floor*3.2);
+  if(!VAD.rec){
+    if(rms>thr){ VAD.hot+=ms; } else { VAD.hot=Math.max(0,VAD.hot-ms*2); if(!herVoice) VAD.floor=Math.min(0.05,VAD.floor*0.96+rms*0.04); }
+    if(VAD.hot>=(herVoice||streaming?260:120)){
+      if(herVoice||streaming) interrupt('you spoke');
+      VAD.rec=[...VAD.pre]; VAD.voiced=VAD.hot; VAD.cold=0; VAD.hot=0; userTalking=true; setState('listening');
     }
-  };
-  rec.onend=()=>{ if(recWanted) setTimeout(()=>{try{rec.start();}catch{}},150); };
-  rec.onerror=e=>{ if(e.error!=='no-speech'&&e.error!=='aborted') addChat('sys','mic error: '+e.error); };
-  try{rec.start();}catch{}
+    micStatus(`mic on · ${herVoice?'she is speaking — talk to interrupt':state==='thinking'?'thinking — talk to interrupt':'listening'} · level ${(rms*1000|0)}`);
+    return;
+  }
+  VAD.rec.push(x);
+  if(rms>Math.max(0.01,VAD.floor*2.5)){ VAD.cold=0; VAD.voiced+=ms; } else VAD.cold+=ms;
+  const len=VAD.rec.reduce((a,b)=>a+b.length,0)/sr;
+  micStatus(`mic on · hearing you · ${len.toFixed(1)} s`);
+  if(VAD.cold>=750||len>=15){ const chunks=VAD.rec, voiced=VAD.voiced; stopCapture();
+    if(voiced>=250) transcribe(encodeWav(chunks,sr)); }
 }
-function stopRec(){ recWanted=false; try{rec&&rec.stop();}catch{} rec=null; }
+function encodeWav(chunks,sr){
+  const n=chunks.reduce((a,b)=>a+b.length,0), x=new Float32Array(n); let o=0; for(const c of chunks){x.set(c,o);o+=c.length;}
+  const R=sr/16000, m=Math.floor(n/R), pcm=new Int16Array(m);
+  for(let i=0;i<m;i++){ const a=Math.floor(i*R), b=Math.max(a+1,Math.floor((i+1)*R)); let s=0; for(let k=a;k<b;k++) s+=x[k]; pcm[i]=clamp(s/(b-a),-1,1)*32767; }
+  const buf=new ArrayBuffer(44+pcm.length*2), v=new DataView(buf), str=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+  str(0,'RIFF'); v.setUint32(4,36+pcm.length*2,true); str(8,'WAVE'); str(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true); str(36,'data'); v.setUint32(40,pcm.length*2,true);
+  new Int16Array(buf,44).set(pcm); return new Blob([buf],{type:'audio/wav'});
+}
+async function transcribe(blob){
+  const seq=++utterSeq; transcribing++; if(!speaking()&&!streaming) setState('thinking');
+  try{
+    const r=await fetch('/transcribe',{method:'POST',headers:{'Content-Type':'audio/wav'},body:blob});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||`transcription HTTP ${r.status}`);
+    const text=(j.text||'').trim();
+    if(text&&awake&&seq>lastSentSeq&&!VAD.rec){ lastSentSeq=seq; transcribing--; return send(text); }   // a newer utterance already started: let that one speak
+  }catch(e){ addChat('sys','speech recognition failed: '+e.message); }
+  transcribing--; if(awake&&!streaming&&!speaking()) setState('listening');
+}
 async function startVAD(){
-  if(vadStream) return;
-  vadStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
-  const ctx=audio(); const an=ctx.createAnalyser(); an.fftSize=1024; ctx.createMediaStreamSource(vadStream).connect(an);
-  const buf=new Float32Array(an.fftSize); let floor=0.01, hot=0, cold=0;
-  setInterval(()=>{ an.getFloatTimeDomainData(buf); let s=0; for(const v of buf)s+=v*v; const rms=Math.sqrt(s/buf.length);
-    if(!speaking()) floor=floor*0.97+rms*0.03;
-    const thr=Math.max(0.02,floor*3.5);
-    if(rms>thr){hot++;cold=0;lastHot=performance.now();} else {cold++; if(cold>12) hot=0;}
-    const talking=hot>=3&&cold<12; if(talking!==userTalking){ userTalking=talking; if(state==='listening') setState('listening'); }
-    if(hot>=4&&speaking()&&!NOVAD&&!scenarioRunning&&performance.now()-speechStartedAt()>350){ hot=0; interrupt('voice detected'); }
-  },40);
+  if(micStream) return;
+  micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+  micCtx=new AudioContext(); await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([TAP],{type:'application/javascript'})));
+  const node=new AudioWorkletNode(micCtx,'tap'), mute=micCtx.createGain(); mute.gain.value=0;
+  micCtx.createMediaStreamSource(micStream).connect(node); node.connect(mute).connect(micCtx.destination);
+  node.port.onmessage=e=>onMicChunk(e.data); micStatus('mic on');
 }
-function speechStartedAt(){ return items.length?Math.min(...items.map(i=>i.start))*1000-(ac?ac.currentTime*1000-performance.now():0):0; }
 
 // ═══════════════════════════ vision: camera -> /vision/frame -> presence/identity -> greeting ═══════════════════════════
 const video=document.createElement('video'); video.muted=true; video.playsInline=true;
 const camc=$('#cam'), camg=camc.getContext('2d'); let camOn=false, visionBusy=false, sleepTimer=null;
 async function startCam(){
   const s=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}}); video.srcObject=s; await video.play(); camOn=true;
-  $('#camlbl').textContent='camera on · looking for a face'; setInterval(visionTick,220);
+  $('#camlbl').textContent='camera on · looking for a face'; visionTimer??=setInterval(visionTick,220);
 }
+let visionTimer=null;
 const snap=document.createElement('canvas');
 function grab(q=0.6,w=320){ snap.width=w; snap.height=Math.round(w*3/4); snap.getContext('2d').drawImage(video,0,0,snap.width,snap.height); return snap.toDataURL('image/jpeg',q).split(',')[1]; }
 async function visionTick(){
@@ -423,14 +432,14 @@ function handleVision(v){
   if(v.present&&!awake) wake();
   if(!v.present&&awake&&!sleepTimer) sleepTimer=setTimeout(()=>{ if(!V.session) sleep(); },6000);
   if(v.present&&sleepTimer){clearTimeout(sleepTimer);sleepTimer=null;}
-  if(v.greet&&!scenarioRunning) send('',{greeting:true});   // a running scenario drives its own approach/greeting
+  if(v.greet) send('',{greeting:true});
 }
 function showVision(v){
   $('#v_p').textContent=v.present?'yes':'no'; $('#v_p').className=v.present?'on':''; $('#v_i').textContent=v.display||v.identity; $('#v_c').textContent=v.confidence??'—'; $('#v_s').textContent=v.session||'—';
   if(v.faces){ $('#v_f').textContent=v.faces.length; $('#v_ms').textContent=v.ms+' ms'; $('#camlbl').textContent=v.faces.length?`${v.display||v.identity}${v.confidence?' · match '+v.confidence:''}${v.faces.length>1?' · +'+(v.faces.length-1)+' more':''}`:'no face'; }
 }
-function wake(){ awake=true; setState('listening'); startRec(); nextBlink=performance.now()+900; }
-function sleep(){ sleepTimer=null; awake=false; interrupt('visitor left'); stopRec(); setState('asleep'); }
+function wake(){ awake=true; setState('listening'); nextBlink=performance.now()+900; }
+function sleep(){ sleepTimer=null; awake=false; stopCapture(); interrupt('visitor left'); setState('asleep'); }
 async function refreshUsers(){
   const j=await (await fetch('/users')).json(); const u=Object.entries(j.users); $('#auto').checked=j.auto_remember;
   $('#users').innerHTML=u.length?u.map(([id,x])=>`<div class=user><b>${esc(x.display)}</b> <small>${esc(x.samples)} face samples · ${esc(x.how)}</small><small>prefs: ${esc(Object.entries(x.prefs).map(([k,v])=>k+': '+v).join('; ')||'none')}</small><button class=sm data-forget="${esc(id)}">forget</button></div>`).join('')
@@ -439,13 +448,21 @@ async function refreshUsers(){
   $('#users').querySelectorAll('[data-forget]').forEach(b=>b.onclick=()=>fetch('/users/forget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity:b.dataset.forget})}));
 }
 async function simulateApproach(identity,force){
-  audio(); if(!vadStream){ try{await startVAD();}catch{} }
+  audio();
   const r=await fetch('/vision/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity,force_greet:!!force})});
   const v=await r.json(); V.identity=v.identity; V.confidence=null; V.others=0; V.session=v.session; user.x=0.5;user.y=0.42;user.seen=performance.now()+6e5;
   showVision({...v,present:true});
   if(!awake) wake(); if(v.greet) return send('',{greeting:true}); return null;
 }
-$('#start').onclick=async()=>{ $('#start').disabled=true; audio();
+// one mirror at a time: a second tab listening to the same mic would transcribe every utterance twice and cancel its own turns
+const mirrorBus=new BroadcastChannel('aria-mirror');
+function stopMirror(){
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; micCtx?.close(); micCtx=null; micStatus('mic off — mirror running in another tab'); }
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; camOn=false; $('#camlbl').textContent='camera off — another tab took over'; }
+  $('#start').disabled=false; $('#start').textContent='▶ Start mirror (camera + mic + audio)';
+}
+mirrorBus.onmessage=e=>{ if(e.data==='claim') stopMirror(); };
+$('#start').onclick=async()=>{ $('#start').disabled=true; audio(); mirrorBus.postMessage('claim');
   try{await startVAD();}catch(e){addChat('sys','mic denied: '+e);}
   try{await startCam();}catch(e){addChat('sys','camera denied: '+e+' — use "Simulate approach"');}
   $('#start').textContent='● mirror running'; };
@@ -457,61 +474,9 @@ $('#snap').onclick=async()=>{ if(!camOn){addChat('sys','snapshot: start the mirr
 $('#auto').onchange=e=>fetch('/users/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:e.target.checked})});
 $('#ureset').onclick=async()=>{ await fetch('/users/reset',{method:'POST'}); addChat('sys','all users forgotten'); };
 $('#stop').onclick=()=>interrupt('button');
-$('#reset').onclick=()=>{interrupt('reset'); fetch('/reset',{method:'POST'}); $('#chat').innerHTML=''; $('#card').style.display='none';};
+$('#reset').onclick=()=>{interrupt('reset'); fetch('/reset',{method:'POST'}); $('#chat').innerHTML='';};
 $('#txt').onkeydown=e=>{ if(e.key==='Enter'&&e.target.value.trim()){ audio(); if(!awake){awake=true;setState('listening');} send(e.target.value.trim());e.target.value='';} };
 $('#txt').oninput=()=>{ if(items.length||streaming) interrupt('typing'); };
 refreshUsers();
 
-// ═══════════════════════════ scenarios: deterministic flows, expected vs actual, Home Assistant request logged ═══════════════════════════
-let scenarioRunning=false, SCEN=[];
-const log=(kind,data)=>fetch('/scenarios/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,...data})});
-async function loadScenarios(){ SCEN=await (await fetch('/scenarios')).json();
-  $('#scen').innerHTML=SCEN.map((s,i)=>`<div class=sc id="sc_${esc(s.id)}"><b>${esc(s.title)}</b><i>${esc(s.concept)}</i>${s.steps.map(st=>`<span class=say>${esc(st.approach?'→ approach as '+st.approach:st.say?'“'+st.say+'”':'check '+st.check)}${st.interrupt_after_ms?' ⏹ after '+esc(st.interrupt_after_ms)+' ms':''}</span>`).join('')}<div><button class=sm data-run="${esc(s.id)}">▶ Run</button></div><div class=res></div></div>`).join('');
-  $('#scen').querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>runScenario(b.dataset.run)); }
-async function firstUser(){ let j=await (await fetch('/users')).json(); let ids=Object.keys(j.users);
-  if(!ids.length){ await fetch('/users/simulate',{method:'POST'}); j=await (await fetch('/users')).json(); ids=Object.keys(j.users); } return ids[0]; }
-function judge(step,res,extra){
-  const ex=step.expect||{}; const fails=[]; const names=res.tools.map(t=>t.name);
-  if(ex.no_tools&&names.length) fails.push(`expected no tool, got ${names.join(',')}`);
-  if(ex.tools){ const a=[...names].sort().join(','), b=[...ex.tools].sort().join(','); if(a!==b) fails.push(`expected tools [${ex.tools}], got [${names}]`); }
-  if(ex.tools_any&&!names.some(n=>ex.tools_any.includes(n))) fails.push(`expected one of [${ex.tools_any}], got [${names}]`);
-  if(ex.room&&!res.tools.some(t=>(t.result?.device||'').endsWith(ex.room.replace(' ','_'))||(t.args.room||'').toLowerCase()===ex.room)) fails.push(`expected room ${ex.room}, got ${res.tools.map(t=>t.args.room||t.result?.device).join(',')||'—'}`);
-  if(ex.args&&!res.tools.some(t=>Object.entries(ex.args).every(([k,v])=>String(t.args[k]).toLowerCase()===String(v).toLowerCase()))) fails.push(`expected args ${JSON.stringify(ex.args)}, got ${JSON.stringify(res.tools.map(t=>t.args))}`);
-  if(ex.greeting&&!res.text.trim()&&!extra.suppressed) fails.push('expected a spoken greeting');
-  if(ex.text_not) for(const w of ex.text_not) if(res.text.toLowerCase().includes(w.toLowerCase())) fails.push(`text must not contain "${w}"`);
-  if(ex.text_has&&!res.text.toLowerCase().includes(ex.text_has.toLowerCase())) fails.push(`text should contain "${ex.text_has}"`);
-  if(ex.interrupted&&!res.interrupted) fails.push('expected the interruption to stop speech');
-  if(ex.stop_ms_max!=null&&res.stop_ms!=null&&res.stop_ms>ex.stop_ms_max) fails.push(`stop took ${res.stop_ms} ms > ${ex.stop_ms_max}`);
-  if(ex.state) for(const [k,v] of Object.entries(ex.state)){ const [dev,prop]=k.split('.'); if(extra.state&&extra.state[ex.room]&&extra.state[ex.room][dev][prop]!==v) fails.push(`expected ${ex.room} ${k}=${v}, got ${extra.state[ex.room][dev][prop]}`); }
-  if(ex.prefs_has&&!(extra.prefs||'').toLowerCase().includes(ex.prefs_has)) fails.push(`expected a stored preference containing "${ex.prefs_has}", got "${extra.prefs}"`);
-  return fails;
-}
-async function runScenario(id){
-  if(scenarioRunning) return; const s=SCEN.find(x=>x.id===id); const box=$(`#sc_${id} .res`); box.textContent=''; scenarioRunning=true;
-  const out=l=>{ const d=document.createElement('div'); d.innerHTML=l; box.append(d); };   // l is built above from esc()'d parts only
-  log('start',{scenario:id,title:s.title});
-  try{
-    let uid=null; audio();
-    for(const [n,step] of s.steps.entries()){
-      let res={text:'',tools:[],interrupted:false,stop_ms:null}, extra={};
-      if(step.approach){ const ident=step.approach==='guest'?'unknown':(uid=uid||await firstUser()); $('#who').value=ident;
-        await fetch('/reset',{method:'POST'}); const r=await simulateApproach(ident,true); res=r||res; extra.suppressed=!r; }
-      else if(step.say){ if(!awake){ const ident=uid=uid||await firstUser(); $('#who').value=ident; await simulateApproach(ident,false); await waitSilence(); }
-        if(step.interrupt_after_ms){ const p=send(step.say); await new Promise(r=>setTimeout(r,step.interrupt_after_ms)); const w0=performance.now(); while(!speaking()&&performance.now()-w0<12000) await new Promise(r=>setTimeout(r,50));
-          await new Promise(r=>setTimeout(r,400)); const ms=interrupt('scenario barge-in'); res=await p; res.interrupted=ms!=null; res.stop_ms=ms; }
-        else res=await send(step.say); }
-      else if(step.check==='prefs'){ const j=await (await fetch('/users')).json(); extra.prefs=Object.values(j.users[V.identity]?.prefs||{}).join(' '); }
-      if(step.expect?.state){ extra.state=(await (await fetch('/home/api/v1/state')).json()).rooms; }
-      const fails=judge(step,res,extra); const ok=!fails.length;
-      const ha=res.tools.filter(t=>t.result?.ha).map(t=>`   HA → ${t.result.ha.method} ${t.result.ha.path} ${t.result.ha.json?JSON.stringify(t.result.ha.json):''}`).join('\n');
-      const actual=res.tools.length?res.tools.map(t=>`${t.name}(${JSON.stringify(t.args)})`).join(', '):'no tool';
-      out(`<span class="${ok?'pass':'fail'}">${ok?'✓':'✗'} step ${n+1}</span> ${esc(step.approach?'approach '+step.approach:step.say?'“'+step.say+'”':'check '+step.check)}\n   expected: ${esc(JSON.stringify(step.expect))}\n   actual: ${esc(actual)}${res.interrupted?' · interrupted, stop '+esc(res.stop_ms)+' ms':''}\n   said: “${esc((res.text||'').slice(0,160))}”${ha?'\n<span class=ha>'+esc(ha)+'</span>':''}${fails.length?'\n   <span class=fail>'+esc(fails.join('; '))+'</span>':''}`);
-      log(ok?'pass':'fail',{scenario:id,step:n+1,input:step.say||step.approach||step.check,expected:step.expect,actual_tools:res.tools.map(t=>({name:t.name,args:t.args,ha:t.result?.ha})),said:res.text,fails});
-      if(!step.interrupt_after_ms) await waitSilence();
-      await new Promise(r=>setTimeout(r,500));
-    }
-  }catch(e){ out(`<span class=fail>error: ${esc(e)}</span>`); }
-  finally{ scenarioRunning=false; log('end',{scenario:id}); }
-}
-loadScenarios();
 </script></body></html>

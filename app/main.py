@@ -2,7 +2,7 @@
 
 camera frames -> OpenCV YuNet (detect) + SFace (recognize, anonymous runtime registry: User 1, User 2, ...)
              -> presence/session state machine (greet once per visit)
-Chrome mic   -> Web Speech API text -> /chat -> Ollama (native tool calling, reasoning)
+Chrome mic   -> local VAD/audio capture -> /transcribe -> host Ollama (audio model) -> /chat -> Ollama (tool calling)
              -> mock Home API (/home/api/v1/actions): mutates mock device state, logs the Home Assistant request it would send
              -> Kokoro TTS (ONNX, CPU) + per-20 ms lip features -> NDJSON stream -> WebGL mesh avatar in the browser
 
@@ -15,6 +15,7 @@ import numpy as np
 
 OLLAMA = os.environ.get("OLLAMA", "http://localhost:11434")
 MODEL = os.environ.get("MODEL", "gemma4:e4b-it-q4_K_M")
+STT_MODEL = os.environ.get("STT_MODEL", "gemma4:e4b-it-q4_K_M")
 VOICE = os.environ.get("VOICE", "af_heart")
 FRAME_MS = 20
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -120,12 +121,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ───────────────────────────── Home API (mock adapter) + the Home Assistant request each action maps to ─────────────────────────────
-ROOMS = ["foyer", "living room", "kitchen"]
-PRIVATE_INFO = {"calendar", "front_door"}   # never shown to an unregistered visitor, whatever the model decides
-HOME: dict[str, Any] = {
-    r: {"lights": {"on": r != "kitchen", "brightness": 60 if r != "kitchen" else 0, "scene": None},
-        "music": {"state": "stopped", "query": None, "volume": 30}} for r in ROOMS}
+# ───────────────────────────── Mock home actions: Aria decides, nothing is controlled — every action is only logged ─────────────────────────────
 EVENTS: list[dict] = []
 SUBS: set[asyncio.Queue] = set()
 
@@ -138,120 +134,41 @@ def emit(type_: str, **data) -> dict:
         except asyncio.QueueFull: pass
     return ev
 
-def norm_room(r: str | None) -> str:
-    r = (r or "living room").lower().strip()
-    for k in ROOMS:
-        if k in r or r in k: return k
-    if "downstairs" in r or "lounge" in r: return "living room"
-    return "living room"
-
-def ent(room: str) -> str: return room.replace(" ", "_")
-
-def ha_request(tool: str, args: dict, room: str) -> dict:
-    """What the Home Assistant REST bridge would send for this action. Logged only — HA is out of scope for the POC."""
-    svc = lambda domain, service, data: {"method": "POST", "path": f"/api/services/{domain}/{service}", "json": data}
-    if tool == "play_music":
-        return svc("media_player", "play_media", {"entity_id": f"media_player.{ent(room)}", "media_content_type": "music", "media_content_id": args.get("query"), "enqueue": "replace"})
-    if tool == "media_control":
-        s = {"pause": "media_pause", "resume": "media_play", "play": "media_play", "stop": "media_stop", "next": "media_next_track", "previous": "media_previous_track"}.get((args.get("action") or "pause").lower(), "media_pause")
-        return svc("media_player", s, {"entity_id": f"media_player.{ent(room)}"})
-    if tool == "set_volume":
-        return svc("media_player", "volume_set", {"entity_id": f"media_player.{ent(room)}", "volume_level": round(int(args.get("level", 30)) / 100, 2)})
-    if tool == "set_lights":
-        on = args.get("on", True); on = on.lower() in ("on", "true", "yes", "1") if isinstance(on, str) else bool(on)
-        data = {"entity_id": f"light.{ent(room)}"}
-        if on and args.get("brightness") is not None: data["brightness_pct"] = int(args["brightness"])
-        return svc("light", "turn_on" if on else "turn_off", data)
-    if tool == "lighting_scene":
-        return svc("scene", "turn_on", {"entity_id": f"scene.{ent(room)}_{(args.get('scene') or 'relax').lower()}"})
-    if tool == "show_info":
-        kind = (args.get("kind") or "weather").lower()
-        return {"weather": {"method": "GET", "path": "/api/states/weather.home"}, "front_door": {"method": "GET", "path": "/api/camera_proxy/camera.front_door"},
-                "calendar": {"method": "GET", "path": "/api/calendars/calendar.household?start=<tomorrow>&end=<tomorrow+1d>"},
-                "traffic": {"method": "GET", "path": "(not HA) external routing API"}}.get(kind, {"method": "GET", "path": "/api/states/weather.home"})
-    if tool == "remember_preference":
-        return {"method": "LOCAL", "path": "profile store (never leaves the mirror computer)"}
-    return {"method": "?", "path": "?"}
-
 def apply_action(tool: str, args: dict, identity: str) -> dict:
-    """The thing a real Sonos/Lutron adapter would do. Here: mutate mock state."""
-    room = norm_room(args.get("room"))
-    st = HOME[room]
-    if tool == "play_music":
-        st["music"].update(state="playing", query=args.get("query") or "something relaxing")
-        return {"device": f"sonos.{ent(room)}", "state": st["music"], "room": room}
-    if tool == "media_control":
-        a = (args.get("action") or "pause").lower()
-        st["music"]["state"] = {"pause": "paused", "stop": "stopped", "resume": "playing", "play": "playing",
-                                "next": "playing", "previous": "playing"}.get(a, st["music"]["state"])
-        return {"device": f"sonos.{ent(room)}", "state": st["music"], "room": room}
-    if tool == "set_volume":
-        st["music"]["volume"] = int(max(0, min(100, int(args.get("level", 30)))))
-        return {"device": f"sonos.{ent(room)}", "state": st["music"], "room": room}
-    if tool == "set_lights":
-        on = args.get("on", True)
-        if isinstance(on, str): on = on.lower() in ("on", "true", "yes", "1")
-        b = args.get("brightness")
-        st["lights"].update(on=bool(on), brightness=int(max(0, min(100, int(b)))) if (b is not None and on) else (st["lights"]["brightness"] or 70) if on else 0, scene=None)
-        return {"device": f"lutron.{ent(room)}", "state": st["lights"], "room": room}
-    if tool == "lighting_scene":
-        scene = (args.get("scene") or "relax").lower()
-        bright = {"relax": 35, "evening": 40, "dim": 20, "bright": 100, "movie": 15, "off": 0, "welcome": 70}.get(scene, 50)
-        st["lights"].update(on=bright > 0, brightness=bright, scene=scene)
-        return {"device": f"lutron.{ent(room)}", "state": st["lights"], "room": room}
-    if tool == "show_info":
-        kind = (args.get("kind") or "weather").lower()
-        if kind in PRIVATE_INFO and identity not in USERS:
-            raise PermissionError(f"{kind} is private household information; the visitor is not a registered user")
-        card = {"weather": {"title": "Tomorrow · Chicago", "lines": ["Partly cloudy, 58°F / 44°F", "Rain after 6 pm · 40%", "Wind NW 12 mph"]},
-                "front_door": {"title": "Front door camera", "lines": ["No motion in the last 10 min", "Last event: delivery 2:14 pm"]},
-                "calendar": {"title": "Tomorrow", "lines": ["8:30 Dentist", "12:00 Lunch", "6:00 Dinner reservation"]},
-                "traffic": {"title": "Route to office", "lines": ["I-94 · 32 min, light traffic", "Leave by 8:05 for 8:45 arrival"]}}
-        return {"device": "mirror.display", "state": {"card": card.get(kind, card["weather"]), "kind": kind}, "room": "foyer"}
+    if tool == "home_action":
+        return {"device": str(args.get("device") or "home").strip().lower(), "action": str(args.get("action") or "").strip(), "value": str(args.get("value") or "").strip()}
     if tool == "remember_preference":
         u = USERS.get(identity)
-        if not u: raise ValueError("cannot store a preference for an unregistered visitor")
+        if not u: raise ValueError("cannot store a preference for a guest")
         key = re.sub(r"[^a-z0-9_ ]", "", (args.get("topic") or "general").lower()).strip() or "general"
         u["prefs"][key] = str(args.get("preference") or "").strip()
-        return {"device": f"profile.{identity}", "state": {"prefs": u["prefs"]}, "room": "-"}
+        return {"device": f"profile.{identity}", "action": "remember", "value": f"{key}: {u['prefs'][key]}"}
     raise ValueError(f"unknown tool {tool}")
 
 TOOLS = [
-    {"type": "function", "function": {"name": "play_music", "description": "Start music on the Sonos in a room (artist, genre, playlist or mood).",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "artist, genre, playlist or mood"},
-            "room": {"type": "string", "enum": ROOMS}, "reason": {"type": "string", "description": "one short sentence: why you are calling this now"}},
-            "required": ["query", "room", "reason"]}}},
-    {"type": "function", "function": {"name": "media_control", "description": "Pause, resume, stop or skip music in a room.",
-        "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "stop", "next", "previous"]},
-            "room": {"type": "string", "enum": ROOMS}, "reason": {"type": "string"}}, "required": ["action", "room", "reason"]}}},
-    {"type": "function", "function": {"name": "set_volume", "description": "Set music volume 0-100 in a room.",
-        "parameters": {"type": "object", "properties": {"level": {"type": "integer"}, "room": {"type": "string", "enum": ROOMS},
-            "reason": {"type": "string"}}, "required": ["level", "room", "reason"]}}},
-    {"type": "function", "function": {"name": "set_lights", "description": "Turn lights on/off or set brightness in a room (Lutron).",
-        "parameters": {"type": "object", "properties": {"room": {"type": "string", "enum": ROOMS}, "on": {"type": "boolean"},
-            "brightness": {"type": "integer", "description": "0-100, optional"}, "reason": {"type": "string"}}, "required": ["room", "on", "reason"]}}},
-    {"type": "function", "function": {"name": "lighting_scene", "description": "Activate a lighting scene in a room.",
-        "parameters": {"type": "object", "properties": {"scene": {"type": "string", "enum": ["relax", "evening", "dim", "bright", "movie", "welcome", "off"]},
-            "room": {"type": "string", "enum": ROOMS}, "reason": {"type": "string"}}, "required": ["scene", "room", "reason"]}}},
-    {"type": "function", "function": {"name": "show_info", "description": "Show an information card on the mirror display.",
-        "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["weather", "front_door", "calendar", "traffic"]},
-            "reason": {"type": "string"}}, "required": ["kind", "reason"]}}},
-    {"type": "function", "function": {"name": "remember_preference", "description": "Store a preference the registered visitor explicitly asked you to remember (music taste, lighting, routine). Only for registered users.",
-        "parameters": {"type": "object", "properties": {"topic": {"type": "string", "description": "short key, e.g. music, lights, morning"},
-            "preference": {"type": "string", "description": "the preference in the visitor's words"}, "reason": {"type": "string"}}, "required": ["topic", "preference", "reason"]}}},
+    {"type": "function", "function": {"name": "home_action",
+        "description": "Do something in the house the visitor asked for: music, lights, TV, temperature, blinds, anything. Mock: it is only logged.",
+        "parameters": {"type": "object", "properties": {
+            "device": {"type": "string", "description": "what to control, e.g. music, lights, tv, thermostat, blinds"},
+            "action": {"type": "string", "description": "what to do, e.g. play, pause, stop, turn on, turn off, dim, set"},
+            "value": {"type": "string", "description": "details such as artist or song, brightness, temperature, room; empty if none"}},
+            "required": ["device", "action"]}}},
+    {"type": "function", "function": {"name": "remember_preference", "description": "Remember something a registered user explicitly asked you to remember about them. Never for guests.",
+        "parameters": {"type": "object", "properties": {"topic": {"type": "string", "description": "short key, e.g. music, coffee, morning"},
+            "preference": {"type": "string", "description": "the preference in the user's words"}}, "required": ["topic", "preference"]}}},
 ]
 
-SYSTEM = """You are Aria, the home concierge of a private residence, appearing as a woman in the foyer mirror. Warm, calm, intelligent, a little playful. You speak out loud: reply in one or two short natural sentences, the first one very short. No emoji, lists or markdown. Never narrate your thoughts.
+SYSTEM = """You are Aria, a friendly concierge who lives in the foyer mirror of a private home. You are having a spoken, face-to-face conversation: warm, natural, a little playful. Reply in one or two short sentences (under 35 words). No emoji, lists or markdown. Never describe your thoughts.
 
-Turn-taking: you speak only when spoken to. After you answer or confirm, stop and wait. Ask a question only when you need an answer to act, or when offering exactly one suggestion in a greeting.
+You are also a knowledgeable companion, not just a house controller. Always answer general questions directly from your own knowledge: science, geography, history, cooking, advice, ideas, small talk, jokes (for example "How far is the moon?" => "About 384,000 kilometers, roughly 239,000 miles."). Only for live data you cannot know (news, today's weather, sports scores) say briefly that you don't have it right now.
 
-Home control tools: Sonos music and Lutron lights in rooms foyer, living room, kitchen ("downstairs" = living room). Call a tool whenever the user asks for an action, including short follow-ups like "yes", "sure", "do it" after you offered something (yes to music => play_music with the choice you offered or their preference, default room living room). If the user asks for several things, call several tools in the same reply; never add actions the user did not ask for. "Dim" = set_lights brightness 25. "Louder"/"quieter" = set_volume relative to the current volume you were told. Asking to see/show weather, calendar, traffic or the front door => show_info. If a registered user asks you to remember something about themselves => remember_preference. Never claim an action happened without calling the tool; after calling, say one short confirming sentence (what, where). The reason argument is one honest sentence. No tools for greetings, chit-chat or questions. "Thanks", "that's all", "goodbye", "never mind" end the conversation: call no tool, change nothing, answer with a short warm goodbye and no question.
+When the visitor asks you to do something in the house (music, lights, TV, temperature, blinds, anything), call home_action, then confirm in one short sentence what you did. A short "yes", "sure", "please" after you offered something means: do what you offered, with any detail they added. For example, you offered music and they say "yes, play Frank Sinatra": call home_action with device music, action play, value Frank Sinatra. Use the real tool-calling mechanism; never write a function call in your spoken text. Never claim you did something without calling the tool. No tools for questions or chit-chat. If a registered user asks you to remember something about them, call remember_preference.
 
-Each user message starts with a [visitor: ...] context line: obey it. Registered visitors are called by their label (User 1, User 2, ...) — that is the only name you know; use it sparingly, mostly in greetings. An unregistered visitor is a guest: never use any name or label, never share or show private household info (calendar, reminders, preferences, cameras) — politely say that is only for household members. If other people are present, do not mention private reminders or calendar. Use known preferences to make your single suggestion specific."""
+Each user message starts with a [visitor: ...] line. A registered visitor is "User 1" (or User N); use that label only in greetings. A guest is unregistered: never use a name and never reveal stored preferences. "Thanks", "bye", "that's all": a short warm goodbye, no question, no tool."""
 
 # ───────────────────────────── Users: anonymous, runtime-only face registry ─────────────────────────────
 USERS: dict[str, dict] = {}        # "user1": {"display": "User 1", "embeddings": [...], "prefs": {...}, "registered_at": ts}
-AUTO = {"remember": True}          # remember a new face automatically when it engages the mirror (switchable from the UI)
+AUTO = {"remember": False}         # new faces stay guests unless auto-remember is explicitly enabled
 
 def next_user_id() -> str:
     n = 1
@@ -271,8 +188,7 @@ def identity_line(identity: str, confidence: float | None, others: int) -> str:
         return f"[visitor: guest, not registered — no name, no private info{others_s}]"
     prefs = "; ".join(f"{k}: {v}" for k, v in u["prefs"].items()) or "none stored yet"
     conf = f", face match {confidence:.2f}" if confidence else ", simulated recognition"
-    return f"[visitor: {u['display']}, registered household user{conf}{others_s}. Preferences: {prefs}. House now: " + \
-           "; ".join(f"{r}: lights {'on ' + str(s['lights']['brightness']) + '%' if s['lights']['on'] else 'off'}, music {s['music']['state']} vol {s['music']['volume']}" for r, s in HOME.items()) + "]"
+    return f"[visitor: {u['display']}, registered household user{conf}{others_s}. Preferences: {prefs}]"
 
 # ───────────────────────────── Vision: YuNet detect + SFace recognize + presence state machine ─────────────────────────────
 DET = cv2.FaceDetectorYN.create(os.path.join(MODELS, "yunet.onnx"), "", (320, 240), 0.75, 0.3, 50)
@@ -338,14 +254,9 @@ def presence_update(faces: list[dict], img: np.ndarray) -> dict:
         if engaged and not VIS["session"] and not waiting_for_snapshot and (len(names) >= 3 or now - VIS["since"] > 2.0):
             VIS["session"] = uuid.uuid4().hex[:8]
             ident = VIS["identity"]
-            if ident != VIS.get("last_session_identity"): HISTORY.clear()
-            VIS["last_session_identity"] = ident
+            HISTORY.clear()
             emit("session.started", session=VIS["session"], identity=ident, confidence=VIS["confidence"], approach_s=round(now - VIS["since"], 2), others=len(faces) - 1)
-            last = VIS["greeted"].get(ident, 0)
-            if now - last < 180 and ident != "unknown":
-                emit("greeting.suppressed", identity=ident, reason="greeted recently", ago_s=round(now - last))
-            else:
-                VIS["greeted"][ident] = now; greet = ident
+            VIS["greeted"][ident] = now; greet = ident
     elif VIS["present"] and now - VIS["last_seen"] > 3.0:
         end_presence(now)
     return {"present": VIS["present"], "engaged": bool(VIS["engaged_since"]) and VIS["present"], "identity": VIS["identity"], "confidence": VIS["confidence"],
@@ -369,14 +280,14 @@ def lip_features(samples: np.ndarray, sr: int) -> dict:
     x = samples[: frames * n].reshape(frames, n).astype(np.float32)
     rms = np.sqrt((x ** 2).mean(axis=1) + 1e-9)
     ref = max(np.percentile(rms, 95), 1e-4)
-    open_ = np.clip((rms / ref) ** 0.7, 0, 1)
+    open_ = np.clip((rms / ref - 0.12) / 0.88, 0, 1) ** 0.85   # gate low energy so the lips close between syllables
     win = np.hanning(n).astype(np.float32)
     spec = np.abs(np.fft.rfft(x * win, axis=1))
     freqs = np.fft.rfftfreq(n, 1 / sr)
     cent = (spec * freqs).sum(axis=1) / (spec.sum(axis=1) + 1e-6)
     wide = np.clip((cent - 900) / 2600, 0, 1)
     wide[open_ < 0.08] = 0.3
-    k = np.array([0.1, 0.2, 0.4, 0.2, 0.1])
+    k = np.array([0.15, 0.7, 0.15])
     open_s = np.convolve(open_, k, mode="same"); wide_s = np.convolve(wide, np.array([0.2, 0.2, 0.2, 0.2, 0.2]), mode="same")
     return {"frame_ms": FRAME_MS, "open": [round(float(v), 3) for v in open_s], "wide": [round(float(v), 3) for v in wide_s]}
 
@@ -386,6 +297,11 @@ def synth(text: str) -> dict:
     pcm = np.clip(samples * 32767, -32768, 32767).astype("<i2").tobytes()
     return {"type": "speech", "text": text, "sr": sr, "pcm16": base64.b64encode(pcm).decode(),
             "dur_s": round(len(samples) / sr, 3), "synth_s": round(time.time() - t0, 3), "feats": lip_features(samples, sr)}
+
+TEXT_CALL_RE = re.compile(r"`*\b(home_action|remember_preference)\s*\(([^)]*)\)`*\s*")   # small models sometimes write the call as text
+def text_calls(content: str) -> tuple[list[dict], str]:
+    calls = [{"name": n, "arguments": dict(re.findall(r"(\w+)\s*=\s*[\"']([^\"']*)[\"']", a))} for n, a in TEXT_CALL_RE.findall(content)]
+    return calls, TEXT_CALL_RE.sub("", content).strip()
 
 SENT_RE = re.compile(r"^(.*?[.!?…]+[\"')\]]*)(\s+|$)", re.S)
 CLAUSE_RE = re.compile(r"^(.{12,}?[,;:—–]|.{12,}? -)\s+", re.S)
@@ -414,6 +330,31 @@ class Msg(BaseModel):
     others: int = 0
     greeting: bool = False
 
+@app.post("/transcribe")
+async def transcribe(request: Request):
+    audio = await request.body()
+    if len(audio) > 12 * 1024 * 1024:
+        return JSONResponse({"error": "audio is too large"}, status_code=413)
+    if not audio:
+        return {"text": ""}
+    media_type = request.headers.get("content-type", "audio/webm").split(";", 1)[0]
+    extension = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mp4": "m4a", "audio/mpeg": "mp3"}.get(media_type, "webm")
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            response = await client.post(f"{OLLAMA}/v1/audio/transcriptions",
+                data={"model": STT_MODEL, "language": "en", "response_format": "json",
+                      "prompt": "Transcribe the spoken words verbatim. Do not paraphrase or infer."},
+                files={"file": (f"utterance.{extension}", audio, media_type)})
+        if response.is_error:
+            return JSONResponse({"error": f"Ollama transcription failed ({response.status_code}): {response.text[:400]}"}, status_code=502)
+        text = (response.json().get("text") or "").strip()
+        if not re.search(r"[A-Za-z0-9]", text) or re.fullmatch(r"[\[(].*[\])]", text): text = ""   # silence / "[noise]" style outputs
+        emit("speech.transcribed", text=text, bytes=len(audio))
+        return {"text": text}
+    except Exception as exc:
+        emit("speech.transcription_error", error=repr(exc))
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
 async def ollama_stream(messages: list[dict], tools: bool):
     body = {"model": MODEL, "stream": True, "keep_alive": "60m", "messages": messages,
             "options": {"num_predict": 200, "temperature": 0.3, "num_ctx": 4096}}
@@ -436,7 +377,7 @@ async def chat(m: Msg):
     if m.greeting:
         who = f"{label} just approached the mirror" if label else "an unregistered guest just approached the mirror"
         user_text = (f"({who}, it is {time_of_day()}. Greet {'them as ' + label + ' ' if label else 'them warmly without any name '}in one short sentence, "
-                     f"then make exactly one specific offer{' based on their preferences' if label else ' (music or lights)'} as a question, then stop.)")
+                     f"then ask exactly one friendly question offering something{' based on their preferences' if label else ''} (for example some music to welcome them home), then stop.)")
     else:
         user_text = m.text
     TURN["n"] += 1; my_turn = TURN["n"]   # a newer turn makes this one stale: it must not write history or run actions any more
@@ -461,7 +402,7 @@ async def chat(m: Msg):
 
         def schedule(sentences):
             for s in sentences:
-                clean = re.sub(r"[*_#`]+", "", s)
+                clean = re.sub(r"[*_#`]+", "", TEXT_CALL_RE.sub("", s))
                 if clean.strip():
                     st["scheduled"] += 1; speech_q.put_nowait(loop.run_in_executor(None, synth, clean))
 
@@ -476,24 +417,29 @@ async def chat(m: Msg):
                         st["first_tok"] = round(time.time() - t0, 3); emit("llm.first_token", turn=turn_id, latency_s=st["first_tok"])
                     content += tok; buf += tok
                     await q.put(json.dumps({"type": "token", "text": tok}) + "\n")
-                    sents, buf = pop_sentences(buf, False, first=st["scheduled"] == 0); schedule(sents)
+                    if not re.search(r"\b(home_action|remember_preference)\s*\([^)]*$", buf):   # never speak half of a text tool call
+                        sents, buf = pop_sentences(buf, False, first=st["scheduled"] == 0); schedule(sents)
                 for tc in msg.get("tool_calls", []) or []:
                     calls.append(tc["function"])
                 if ch.get("done"):
                     await q.put(json.dumps({"type": "llm_done", "eval_count": ch.get("eval_count"), "tok_s": round(ch.get("eval_count", 0) / max(ch.get("eval_duration", 1) / 1e9, 1e-3), 1),
                                             "prompt_s": round(ch.get("prompt_eval_duration", 0) / 1e9, 2)}) + "\n")
             sents, buf = pop_sentences(buf, True); schedule(sents)
+            if not calls:
+                calls, content = text_calls(content)
+                if calls: emit("llm.text_tool_call", turn=turn_id, tools=[c["name"] for c in calls])
+            else: content = TEXT_CALL_RE.sub("", content).strip()
             if not content.strip() and not calls:
                 emit("llm.empty_round", turn=turn_id, eval_count=ch.get("eval_count"), note="model produced neither text nor a parsable tool call")
             return content, calls
 
-        CLAIM_RE = re.compile(r"\b(lights? (are |is )?(on|off|dimmed|set)|playing|paused|resumed|stopped|volume|brightness|turned (on|off)|set to|dimmed|done|i can play|i'll play|i will play|put on|putting on|let me play|here is|here's)\b", re.I)
-        ACTION_RE = re.compile(r"\b(play |put on|put some|turn (on|off|up|down)|switch (on|off)|dim\b|brighten|lights? (on|off)|volume|louder|quieter|pause|resume|skip|next track|stop the|show me|show the|lighting scene|set the|remember that)", re.I)
+        CLAIM_RE = re.compile(r"\b(i'?ve|i have|i'?m|i am|now) (now )?(playing|started|turned|switched|dimmed|set|put on|paused|stopped|opened|closed)\b|\b(is|are) now (playing|on|off|set)\b", re.I)
+        ACTION_RE = re.compile(r"\b(play |put on|put some|turn (on|off|up|down)|switch (on|off)|dim\b|brighten|lights? (on|off)|volume|louder|quieter|pause|resume|skip|next (track|song)|stop the|set the|open the|close the|remember that)", re.I)
         AFFIRM_RE = re.compile(r"^\W*(yes|yeah|yep|sure|please|ok|okay|go ahead|do it|sounds good|why not|absolutely|of course|that would be)\b", re.I)
         prev_assistant = next((h["content"] for h in reversed(HISTORY[:-1]) if h["role"] == "assistant" and h.get("content")), "")
         guest_private = (m.identity not in USERS) and re.search(r"\b(calendar|reminder|appointment|front door|camera|schedule)\b", m.text, re.I)
         CLOSER_RE = re.compile(r"\b(that'?s all|thanks|thank you|goodbye|bye|never mind|nevermind|no thanks|nothing else)\b", re.I)
-        needs_action = (not m.greeting) and not guest_private and not CLOSER_RE.search(m.text) and bool(ACTION_RE.search(m.text) or (AFFIRM_RE.match(m.text) and prev_assistant.strip().endswith("?")))
+        needs_action = (not m.greeting) and not guest_private and not CLOSER_RE.search(m.text) and bool(ACTION_RE.search(m.text) or (AFFIRM_RE.match(m.text) and re.search(r"\b(would you like|shall i|should i|want me to|how about|can i)\b", prev_assistant, re.I)))
 
         def live() -> bool: return TURN["n"] == my_turn
 
@@ -504,13 +450,12 @@ async def chat(m: Msg):
                 if isinstance(args, str):
                     try: args = json.loads(args)
                     except Exception: args = {}
-                reason = args.pop("reason", "")
-                await q.put(json.dumps({"type": "tool_call", "name": call["name"], "args": args, "reason": reason}) + "\n")
+                await q.put(json.dumps({"type": "tool_call", "name": call["name"], "args": args}) + "\n")
                 ta = time.time()
-                res = run_action({"tool": call["name"], "args": args, "reason": reason, "turn": turn_id, "source": "avatar.llm", "identity": m.identity})
+                res = run_action({"tool": call["name"], "args": args, "turn": turn_id, "identity": m.identity})
                 res["latency_ms"] = round((time.time() - ta) * 1000)
                 await q.put(json.dumps({"type": "tool_result", "name": call["name"], "result": res}) + "\n")
-                HISTORY.append({"role": "tool", "tool_name": call["name"], "content": json.dumps({k: v for k, v in res.items() if k in ("status", "device", "state", "simulated", "error")})})
+                HISTORY.append({"role": "tool", "tool_name": call["name"], "content": json.dumps({k: v for k, v in res.items() if k in ("status", "device", "action", "value", "error")})})
 
         async def producer():
             try:
@@ -629,7 +574,7 @@ async def vision_simulate(e: dict):
     SIM["identity"] = ident
     VIS.update(present=True, since=time.time() - 2.5, last_seen=time.time() + 60, engaged_since=time.time() - 1)   # stays "present" ~1 min without camera frames
     VIS["votes"].clear(); VIS["votes"].extend([(ident, 0.0)] * 5); VIS["identity"] = ident; VIS["confidence"] = None
-    if VIS["session"] and e.get("fresh", True): VIS["session"] = None   # a new approach
+    if VIS["session"] and (e.get("fresh", True) or e.get("force_greet", False)): VIS["session"] = None
     emit("presence.detected", faces=1, size=0.2, simulated=True)
     pres = presence_update([{"box": [0.4, 0.3, 0.2, 0.27], "score": 0.99, "raw": None}], np.zeros((2, 2, 3), np.uint8))
     return pres
@@ -684,38 +629,24 @@ async def users_forget(e: dict):
 async def users_auto(e: dict):
     AUTO["remember"] = bool(e.get("enabled", True)); emit("users.auto_remember", enabled=AUTO["remember"]); return {"auto_remember": AUTO["remember"]}
 
-# ───────────────────────────── Home API endpoint (what a Home Assistant / Sonos / Lutron bridge would expose) ─────────────────────────────
+# ───────────────────────────── Mock action executor + event stream ─────────────────────────────
 def run_action(body: dict) -> dict:
-    """The Home API bridge: validate, mutate mock state, log the Home Assistant request, emit events."""
+    """Nothing is controlled: the action is validated, logged (server log + browser console) and acknowledged."""
     tool, args, identity = body.get("tool"), body.get("args") or {}, body.get("identity") or "unknown"
-    emit("tool_call.requested", tool=tool, args=args, reason=body.get("reason"), turn=body.get("turn"), source=body.get("source"), identity=identity)
     try:
-        t = time.time(); out = apply_action(tool, args, identity)
-        ha = ha_request(tool, args, out["room"] if out["room"] in ROOMS else norm_room(args.get("room")))
-        emit("ha.request", tool=tool, turn=body.get("turn"), simulated=True, note="logged only — Home Assistant is out of scope for this POC", **ha)
-        ev = emit("device.state_changed", tool=tool, device=out["device"], state=out["state"], simulated=True, exec_ms=round((time.time() - t) * 1000, 2), turn=body.get("turn"))
-        return {"status": "ok", "simulated": True, "device": out["device"], "state": out["state"], "ha": ha, "event_id": ev["id"]}
-    except PermissionError as e:
-        emit("policy.private_info_blocked", tool=tool, args=args, identity=identity, error=str(e), turn=body.get("turn"))
-        return {"status": "error", "simulated": True, "error": str(e)}
+        out = apply_action(tool, args, identity)
+        ev = emit("action.mock", tool=tool, identity=identity, turn=body.get("turn"), simulated=True, **out)
+        return {"status": "ok", "simulated": True, **out, "event_id": ev["id"]}
     except Exception as e:
-        emit("tool_call.failed", tool=tool, args=args, error=str(e), turn=body.get("turn"))
+        emit("action.failed", tool=tool, args=args, error=str(e), turn=body.get("turn"))
         return {"status": "error", "simulated": True, "error": str(e)}
 
-@app.post("/home/api/v1/actions")
-async def home_action(req: Request):
-    res = run_action(await req.json())
-    return JSONResponse(res, status_code=200 if res["status"] == "ok" else 400)
-
-@app.get("/home/api/v1/state")
-async def home_state(): return {"rooms": HOME, "simulated": True}
-
-@app.get("/home/api/v1/events")
-async def home_events(request: Request):
+@app.get("/events")
+async def events(request: Request):
     q: asyncio.Queue = asyncio.Queue(maxsize=200); SUBS.add(q)
     async def stream():
         try:
-            yield f"event: snapshot\ndata: {json.dumps({'rooms': HOME, 'recent': EVENTS[-30:]})}\n\n"
+            yield f"event: snapshot\ndata: {json.dumps({'recent': EVENTS[-30:]})}\n\n"
             while True:
                 if await request.is_disconnected(): break
                 try:
@@ -726,51 +657,6 @@ async def home_events(request: Request):
 
 @app.get("/metrics")
 async def metrics(): return METRICS
-
-# ───────────────────────────── Scenarios: deterministic flows the testing page can replay ─────────────────────────────
-# step kinds: approach (identity: "user" = first registered user or guest, "guest"), say (text), interrupt_after_ms, check
-# expect: tools = exact list of tool names (order-free); room; no_tools; text_not = words that must not appear; text_has
-SCENARIOS = [
-    {"id": "evening_music", "title": "Evening arrival → music follow-up", "concept": "Recognition + personalized greeting + 'yes' follow-up executes through the mirror's own control path",
-     "steps": [
-        {"approach": "user", "expect": {"no_tools": True, "greeting": True}},
-        {"say": "Yes, something relaxing downstairs.", "expect": {"tools": ["play_music"], "room": "living room"}},
-        {"say": "A bit louder, please.", "expect": {"tools": ["set_volume"], "room": "living room"}},
-        {"say": "Thanks, that's all for now.", "expect": {"no_tools": True}}]},
-    {"id": "lights", "title": "Lighting control", "concept": "Selected Lutron circuits/scenes via the mirror's own bridge (Home Assistant request logged)",
-     "steps": [
-        {"say": "Dim the foyer lights.", "expect": {"tools_any": ["set_lights", "lighting_scene"], "room": "foyer"}},
-        {"say": "Set the living room to the evening scene.", "expect": {"tools": ["lighting_scene"], "room": "living room"}},
-        {"say": "And turn the kitchen lights off.", "expect": {"tools": ["set_lights"], "room": "kitchen", "state": {"lights.on": False}}}]},
-    {"id": "show_info", "title": "Visual responses on the mirror", "concept": "'Show me ...' puts a card beside the avatar, then it disappears",
-     "steps": [
-        {"say": "Show me tomorrow's weather.", "expect": {"tools": ["show_info"], "args": {"kind": "weather"}}},
-        {"say": "Who is at the front door?", "expect": {"tools": ["show_info"], "args": {"kind": "front_door"}}}]},
-    {"id": "guest_privacy", "title": "Unknown guest → general welcome, no private data", "concept": "Unknown visitor: no name, no guessing, no household information",
-     "steps": [
-        {"approach": "guest", "expect": {"no_tools": True, "greeting": True, "text_not": ["User 1", "User 2", "User 3"]}},
-        {"say": "What's on the calendar tomorrow?", "expect": {"no_tools": True, "text_not": ["Dentist", "Dinner reservation"]}},
-        {"say": "Could you play some jazz in the living room?", "expect": {"tools": ["play_music"], "room": "living room"}}]},
-    {"id": "interrupt", "title": "Barge-in while she speaks", "concept": "Speech stops immediately, face stops with it, next request still works",
-     "steps": [
-        {"say": "Tell me everything you can do around the house, in detail.", "interrupt_after_ms": 1800, "expect": {"interrupted": True, "stop_ms_max": 60}},
-        {"say": "Pause the music downstairs.", "expect": {"tools": ["media_control"], "room": "living room", "args": {"action": "pause"}}}]},
-    {"id": "remember", "title": "Remember a preference (registered user only)", "concept": "With permission, retain a useful preference; it shapes the next greeting",
-     "steps": [
-        {"approach": "user", "expect": {"greeting": True}},
-        {"say": "Please remember that I like quiet jazz in the kitchen in the mornings.", "expect": {"tools": ["remember_preference"]}},
-        {"check": "prefs", "expect": {"prefs_has": "jazz"}}]},
-]
-
-@app.get("/scenarios")
-async def scenarios(): return SCENARIOS
-
-@app.post("/scenarios/log")
-async def scenarios_log(e: dict):
-    """The browser runs the steps (it owns audio and the camera) and reports each verdict here so it lands in the event stream."""
-    kind = re.sub(r"[^a-z_]", "", str(e.pop("kind", "step")).lower()) or "step"
-    data = {k: v for k, v in e.items() if re.fullmatch(r"[a-z_]+", str(k)) and k not in ("id", "ts", "type", "type_")}
-    return emit("scenario." + kind, **data)
 
 @app.on_event("startup")
 async def warm():
