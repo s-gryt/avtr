@@ -3,7 +3,7 @@
 ## Quick start (fresh Mac)
 
 1. Install Ollama natively: https://ollama.com/download (or `brew install ollama`).
-2. Pull the model: `ollama pull gemma4:e4b-it-q4_K_M` (or `make pull-model`).
+2. Pull the chat/audio model: `ollama pull gemma4:e4b-it-q4_K_M`. This installed Gemma tag supports tool calling and audio input.
 3. Start the app: `docker compose up --build` (or `make up`). First build downloads ~150 MB of models into a cached layer.
 4. Open http://localhost:8000 in Chrome.
 
@@ -23,7 +23,7 @@ Set `MODEL` in `.env` (copy `.env.example`) or inline: `MODEL=qwen3:4b-instruct 
 
 | Model | Size | Notes |
 |---|---|---|
-| `gemma4:e4b-it-q4_K_M` | 6.6 GB | Default. Native tool calling. ~8-10 tok/s on M1 16 GB |
+| `gemma4:e4b-it-q4_K_M` | 6.6 GB | Default chat and audio transcription model. Native tool calling; supports audio input. |
 | `gemma4:e4b` | 9.5 GB | Full-precision variant of the same model |
 | `qwen3:4b-instruct` | 2.5 GB | Light fallback for low RAM |
 | `gemma4:12b` | larger | Upgrade candidate for a 48 GB MacBook |
@@ -31,14 +31,16 @@ Set `MODEL` in `.env` (copy `.env.example`) or inline: `MODEL=qwen3:4b-instruct 
 
 Larger models fit on a 48 GB MacBook, but verify tool-calling support for each: `ollama show <model>` must list the `tools` capability. Confirm the tag exists in the Ollama library before pulling.
 
-## Do you need multiple models?
+## Model roles
 
-No. One Ollama chat model with tool support is enough.
+`MODEL` and `STT_MODEL` are independent settings in `.env`. Both default to `gemma4:e4b-it-q4_K_M`; set `STT_MODEL` to another locally pulled Ollama model if it supports audio input. The Docker app forwards captured mic audio to the host Ollama `/v1/audio/transcriptions` endpoint.
 
-- TTS: Kokoro ONNX, runs inside the container on CPU.
-- Vision: OpenCV YuNet (detection) + SFace (recognition), inside the container on CPU.
-- STT: Chrome Web Speech API, in the browser.
+- Chat/tool selection: Ollama `MODEL` on the host.
+- Speech-to-text: Ollama `STT_MODEL` on the host.
+- Text-to-speech: Kokoro ONNX, runs inside Docker on CPU; no Ollama model is needed.
+- Face detection/recognition: OpenCV YuNet + SFace, runs inside Docker on CPU; no Ollama model is needed.
+- Avatar animation: WebGL portrait mesh and audio-derived lip features in Chrome; no Ollama model is needed.
 
-## What leaves your machine
+## Local data
 
-Only speech-to-text audio, sent to Google by Chrome's Web Speech API. LLM, TTS, and vision all run locally.
+Speech audio is sent to the host Ollama service, not to Google. Face embeddings and preferences exist only in the app process memory and are cleared when the container restarts. The app container has no device credentials; home actions are simulated.
