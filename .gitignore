@@ -1,0 +1,11 @@
+app/.venv/
+app/models/
+app/__pycache__/
+app/profiles.json
+.playwright-mcp/
+.omc/
+archive_DO_NOT_COMMIT/
+.DS_Store
+*.pyc
+/*.png
+.env

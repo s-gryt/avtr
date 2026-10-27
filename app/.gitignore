@@ -1,0 +1,5 @@
+
+.omc/
+**/.omc/
+__pycache__/
+*.pyc

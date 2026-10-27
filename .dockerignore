@@ -1,0 +1,12 @@
+**/.venv
+**/models
+archive_DO_NOT_COMMIT
+.playwright-mcp
+.omc
+**/.omc
+/*.png
+**/__pycache__
+**/*.pyc
+**/profiles.json
+.git
+.DS_Store

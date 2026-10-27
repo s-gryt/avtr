@@ -1,0 +1,14 @@
+# Only the application runs in Docker. Ollama runs natively on the host (Metal GPU on a Mac);
+# the container reaches it through host.docker.internal:11434.
+services:
+  avatar:
+    build: .
+    ports:
+      - "${BIND:-127.0.0.1}:${PORT:-8000}:8000"   # localhost only by default (no auth on the API); BIND=0.0.0.0 to expose on the LAN
+    environment:
+      OLLAMA: ${OLLAMA:-http://host.docker.internal:11434}
+      MODEL: ${MODEL:-gemma4:e4b-it-q4_K_M}
+      VOICE: ${VOICE:-af_heart}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # needed on Linux; harmless on macOS/Windows
+    restart: unless-stopped
