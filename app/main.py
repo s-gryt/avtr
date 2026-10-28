@@ -1,7 +1,7 @@
 """Aria — mirror concierge POC. Single-file backend.
 
 camera frames -> OpenCV YuNet (detect) + SFace (recognize, anonymous runtime registry: User 1, User 2, ...)
-             -> presence/session state machine (greet once per visit)
+             -> presence/visit state machine (greet once per run session, "anything I can do for you?" on return)
 Chrome mic   -> local VAD/audio capture -> /transcribe -> host Ollama (audio model) -> /chat -> Ollama (tool calling)
              -> mock Home API (/home/api/v1/actions): mutates mock device state, logs the Home Assistant request it would send
              -> Kokoro TTS (ONNX, CPU) + per-20 ms lip features -> NDJSON stream -> WebGL mesh avatar in the browser
@@ -164,22 +164,41 @@ You are also a knowledgeable companion, not just a house controller. Always answ
 
 When the visitor asks you to do something in the house (music, lights, TV, temperature, blinds, anything), call home_action, then confirm in one short sentence what you did. A short "yes", "sure", "please" after you offered something means: do what you offered, with any detail they added. For example, you offered music and they say "yes, play Frank Sinatra": call home_action with device music, action play, value Frank Sinatra. Use the real tool-calling mechanism; never write a function call in your spoken text. Never claim you did something without calling the tool. No tools for questions or chit-chat. If a registered user asks you to remember something about them, call remember_preference.
 
-Each user message starts with a [visitor: ...] line. A registered visitor is "User 1" (or User N); use that label only in greetings. A guest is unregistered: never use a name and never reveal stored preferences. "Thanks", "bye", "that's all": a short warm goodbye, no question, no tool."""
+Each user message starts with a [visitor: ...] line. A registered visitor is "User 1" (or User N); use that label only in greetings. A guest is unregistered: never use a name and never reveal stored preferences; you cannot remember anything for a guest, so if a guest asks, kindly say you only remember things for registered household members (never claim you noted it). "Thanks", "bye", "that's all": a short warm goodbye, no question, no tool."""
 
-# ───────────────────────────── Users: anonymous, runtime-only face registry ─────────────────────────────
-USERS: dict[str, dict] = {}        # "user1": {"display": "User 1", "embeddings": [...], "prefs": {...}, "registered_at": ts}
-AUTO = {"remember": False}         # new faces stay guests unless auto-remember is explicitly enabled
+# ───────────────────────────── Users + run session: anonymous, runtime-only face memory ─────────────────────────────
+USERS: dict[str, dict] = {}        # registered household users: "user1": {"display": "User 1", "embeddings": [...], "prefs": {...}, ...}; kept until /users/reset or restart
+# Nothing is ever stored for a face that is not registered: it is simply "guest" for one visit (no profile, no face samples),
+# greeted on every approach, and its conversation is dropped when the visit ends. Only "Snapshot → User" registers a face.
+GUEST = "guest"
+# One run session = Start mirror .. Stop. Who was greeted, guests and conversations live only here, in memory.
+RUN: dict[str, Any] = {"id": None, "started": 0.0, "greeted": {}, "last_visitor": None}   # greeted: registered users only
+HISTORIES: dict[str, list[dict]] = {}   # per visitor key (user1, guest): a returning user continues their conversation; a guest's is dropped when they leave
 
 def next_user_id() -> str:
     n = 1
     while f"user{n}" in USERS: n += 1
     return f"user{n}"
 
-def register_user(embeddings: list[list[float]], how: str) -> dict:
+def register_user(embeddings: list[list[float]], how: str) -> str:
     uid = next_user_id()
-    USERS[uid] = {"display": f"User {uid[4:]}", "embeddings": embeddings[-12:], "prefs": {}, "registered_at": round(time.time(), 3), "how": how}
+    USERS[uid] = {"display": f"User {uid[4:]}", "embeddings": embeddings[-16:], "prefs": {}, "registered_at": round(time.time(), 3), "how": how}
     emit("user.registered", identity=uid, display=USERS[uid]["display"], samples=len(USERS[uid]["embeddings"]), how=how, stored="runtime memory only, embeddings, no images")
-    return USERS[uid]
+    return uid
+
+def display_of(key: str | None) -> str:
+    return (USERS.get(key) or {}).get("display") or "Guest"
+
+def rename_visitor(old: str, new: str):
+    """The guest in front was registered with the snapshot button: they were already greeted, keep their conversation."""
+    RUN["greeted"][new] = time.time()
+    if RUN["last_visitor"] == old: RUN["last_visitor"] = new
+    if old in HISTORIES: HISTORIES[new] = HISTORIES.pop(old)
+    if VIS["visit"] and VIS["visit"]["key"] == old: VIS["visit"]["key"] = new; VIS["identity"] = new
+    VIS["votes"].clear()
+
+def history_for(key: str) -> list[dict]:
+    return HISTORIES.setdefault(key or "unknown", [])
 
 def identity_line(identity: str, confidence: float | None, others: int) -> str:
     u = USERS.get(identity)
@@ -190,14 +209,17 @@ def identity_line(identity: str, confidence: float | None, others: int) -> str:
     conf = f", face match {confidence:.2f}" if confidence else ", simulated recognition"
     return f"[visitor: {u['display']}, registered household user{conf}{others_s}. Preferences: {prefs}]"
 
-# ───────────────────────────── Vision: YuNet detect + SFace recognize + presence state machine ─────────────────────────────
+# ───────────────────────────── Vision: YuNet detect + SFace recognize + presence/visit state machine ─────────────────────────────
 DET = cv2.FaceDetectorYN.create(os.path.join(MODELS, "yunet.onnx"), "", (320, 240), 0.75, 0.3, 50)
 REC = cv2.FaceRecognizerSF.create(os.path.join(MODELS, "sface.onnx"), "")
 SFACE_THRESHOLD = 0.363   # OpenCV's documented cosine threshold for SFace
-VIS: dict[str, Any] = {"present": False, "since": 0.0, "last_seen": 0.0, "engaged_since": 0.0, "session": None,
-                       "votes": collections.deque(maxlen=6), "identity": "unknown", "confidence": None, "greeted": {}, "last_faces": [],
-                       "pending": []}   # embeddings of an engaged unknown face, waiting to become User N
-SIM = {"identity": None}   # UI override when there is no camera: None = auto, "unknown", "user1", ...
+CLEARLY_NEW = 0.28        # below this vs. everyone known, an unknown face is safely a guest (not a registered user at a bad angle)
+AWAY_S = 1.2              # face gone this long = the visit ends; coming back later in the run = "anything I can do for you?"
+SURE_MATCH = 0.5          # a single SFace match this strong identifies a known face immediately
+REACQUIRE_S = 0.8         # face lost at least this long and back = verify who it is again (someone else may have stepped in)
+VIS: dict[str, Any] = {"present": False, "since": 0.0, "last_seen": 0.0, "visit": None, "votes": collections.deque(maxlen=8),
+                       "identity": "unknown", "confidence": None, "last_faces": [], "reverify": False, "decide_since": 0.0}
+SIM = {"identity": None}   # UI override: None = camera recognition, "unknown" = a new guest, or a user/guest key
 
 CV_LOCK = threading.Lock()   # YuNet/SFace objects are not thread-safe; frames and snapshots run in worker threads
 def detect_faces(img: np.ndarray) -> list[dict]:
@@ -215,52 +237,113 @@ def detect_faces(img: np.ndarray) -> list[dict]:
 def embed(img: np.ndarray, raw) -> np.ndarray:
     with CV_LOCK: return REC.feature(REC.alignCrop(img, raw))
 
-def recognize(feat: np.ndarray) -> tuple[str, float]:
+def _best(feat: np.ndarray, registry: dict) -> tuple[str, float]:
     best, best_s = "unknown", 0.0
-    for uid, u in USERS.items():
+    for uid, u in registry.items():
         for e in u["embeddings"]:
             s = float(REC.match(feat, np.array(e, dtype=np.float32).reshape(1, -1), cv2.FaceRecognizerSF_FR_COSINE))
             if s > best_s: best, best_s = uid, s
-    return (best if best_s >= SFACE_THRESHOLD else "unknown"), round(best_s, 3)
+    return best, best_s
+
+def recognize(feat: np.ndarray) -> tuple[str, float, float]:
+    """-> (registered user key or "unknown", score of that match, best score against any registered user)."""
+    u, us = _best(feat, USERS)
+    return (u if us >= SFACE_THRESHOLD else "unknown"), round(us, 3), round(us, 3)
+
+def decide(votes: list[tuple[str, float]], waited_s: float, need_unknown: int = 3, allow_timeout: bool = True) -> str | None:
+    """Who is in front of the mirror, from the last few recognitions. None = not sure yet (do not greet anybody yet).
+    "unknown" needs faces that are clearly nobody known (score < CLEARLY_NEW), so a registered user at a bad angle is not taken for a guest."""
+    recent = votes[-5:]
+    known = collections.Counter(n for n, _ in recent if n != "unknown")
+    if known:
+        strong = [(n, s) for n, s in recent if n != "unknown" and s >= SURE_MATCH]
+        if strong: return max(strong, key=lambda t: t[1])[0]   # one clear match is enough: no waiting when someone known comes back
+        top, c = max(known.items(), key=lambda kv: (kv[1], max(s for n, s in recent if n == kv[0])))
+        if c >= 2: return top
+    clear = sum(1 for n, s in recent if n == "unknown" and s < CLEARLY_NEW)
+    if clear >= need_unknown and len(known) == 0: return "unknown"
+    if allow_timeout and waited_s > 3.5: return "unknown"   # face too small/blurred to embed: treat as a guest rather than never greeting
+    return None
+
+def start_visit(key: str, now: float, others: int, simulated: bool = False) -> dict:
+    """Someone is confirmed in front of the mirror. A registered user is greeted once per run, afterwards only followed up;
+    anyone not registered is a guest and greeted on every approach (nothing about them is stored)."""
+    if key not in USERS: key = GUEST
+    returning = key in USERS and key in RUN["greeted"]
+    someone_between = returning and RUN["last_visitor"] not in (None, key)
+    kind = "return" if returning else "greet"
+    if returning:
+        who = USERS.get(key, {}).get("display")
+        text = (f"Welcome back{', ' + who if who else ''}. Anything I can do for you?") if someone_between else "Anything I can do for you?"
+    else:
+        text = None
+        if key in USERS: RUN["greeted"][key] = now
+    VIS["visit"] = {"id": uuid.uuid4().hex[:8], "key": key, "started": now, "kind": kind, "text": text}
+    VIS["identity"] = key; VIS["votes"].clear(); VIS["votes"].extend([(key, VIS["confidence"] or 1.0)] * 3)
+    emit("visit.started", visit=VIS["visit"]["id"], identity=key, display=display_of(key), kind=kind, confidence=VIS["confidence"],
+         approach_s=round(now - VIS["since"], 2), others=others, run=RUN["id"])
+    if kind == "return": emit("greeting.suppressed", identity=key, reason="already greeted in this run session", says=text)
+    return {"kind": kind, "identity": key, "visit": VIS["visit"]["id"], "text": text}
+
+def end_visit(now: float, reason: str):
+    v = VIS["visit"]
+    if not v: return
+    RUN["last_visitor"] = v["key"]
+    emit("visit.ended", visit=v["id"], identity=v["key"], display=display_of(v["key"]), reason=reason, duration_s=round(now - v["started"], 1))
+    VIS["visit"] = None; VIS["identity"] = "unknown"; VIS["confidence"] = None; VIS["votes"].clear()
+    VIS["decide_since"] = now; VIS["reverify"] = False
+    if v["key"] == GUEST: HISTORIES.pop(GUEST, None)   # the next guest is a new person with a new conversation
+
+def end_presence(now: float, reason: str = "left"):
+    if VIS["present"]:
+        VIS["present"] = False
+        emit("presence.left", after_s=round(now - VIS["since"], 1))
+    end_visit(now, reason)
 
 def presence_update(faces: list[dict], img: np.ndarray) -> dict:
-    """present -> engaged (close enough, long enough) -> identity confirmed by vote (or auto-registered) -> greet once per session."""
+    """present -> identity confirmed by votes -> visit (greet once per run session, short "anything I can do for you?" on return).
+    A face lost for a moment and back is verified again, so User 1 leaving and a guest stepping in starts a new visit."""
     now = time.time(); greet = None
     if faces:
         f = faces[0]; size = f["box"][2]
-        VIS["last_seen"] = now
         if not VIS["present"]:
-            VIS.update(present=True, since=now, engaged_since=0.0); VIS["votes"].clear(); VIS["pending"] = []
+            VIS.update(present=True, since=now, decide_since=now, reverify=False); VIS["votes"].clear()
             emit("presence.detected", faces=len(faces), size=size)
-        if size >= 0.11 and f["score"] >= 0.8 and f["raw"] is not None and not SIM["identity"]:
-            feat = embed(img, f["raw"]); name, s = recognize(feat); VIS["votes"].append((name, s))
-            if name == "unknown" and AUTO["remember"] and size >= 0.13 and f["score"] >= 0.9:
-                VIS["pending"].append([round(float(v), 5) for v in feat.flatten()])
-        votes = list(VIS["votes"])[-5:]
-        names = [n for n, _ in votes]
-        if names:
-            top = max(set(names), key=names.count)
-            if names.count(top) >= 3 and top != VIS["identity"]:
-                VIS["identity"] = top; VIS["confidence"] = round(max(s for n, s in votes if n == top), 3) if top != "unknown" else None
-                emit("identity.confirmed" if top != "unknown" else "identity.unknown", identity=top, confidence=VIS["confidence"], votes=names)
-        engaged = size >= 0.12 and (now - VIS["since"]) >= 0.7
-        if engaged and not VIS["engaged_since"]: VIS["engaged_since"] = now
-        # an engaged, unknown, well-seen face becomes User N (snapshot = a few embeddings, no image is stored)
-        if engaged and VIS["identity"] == "unknown" and AUTO["remember"] and len(VIS["pending"]) >= 5 and not SIM["identity"]:
-            u = register_user(VIS["pending"], "auto on approach"); uid = next(k for k, v in USERS.items() if v is u)
-            VIS["pending"] = []; VIS["votes"].clear(); VIS["votes"].extend([(uid, 1.0)] * 3); VIS["identity"] = uid; VIS["confidence"] = 1.0
-            emit("identity.confirmed", identity=uid, confidence=1.0, votes=["registered"])
-        waiting_for_snapshot = AUTO["remember"] and VIS["identity"] == "unknown" and not SIM["identity"] and now - VIS["since"] < 3.5
-        if engaged and not VIS["session"] and not waiting_for_snapshot and (len(names) >= 3 or now - VIS["since"] > 2.0):
-            VIS["session"] = uuid.uuid4().hex[:8]
-            ident = VIS["identity"]
-            HISTORY.clear()
-            emit("session.started", session=VIS["session"], identity=ident, confidence=VIS["confidence"], approach_s=round(now - VIS["since"], 2), others=len(faces) - 1)
-            VIS["greeted"][ident] = now; greet = ident
-    elif VIS["present"] and now - VIS["last_seen"] > 3.0:
+        elif now - VIS["last_seen"] > REACQUIRE_S and VIS["visit"] and VIS["visit"]["key"] == GUEST:
+            # an unregistered face cannot be verified: a guest who stepped out and back is a new guest -> greeted again
+            end_visit(now, "guest stepped out"); VIS["since"] = now
+        elif now - VIS["last_seen"] > REACQUIRE_S:
+            VIS["votes"].clear(); VIS["decide_since"] = now; VIS["reverify"] = bool(VIS["visit"])
+        VIS["last_seen"] = now
+        sim = SIM["identity"]; v = VIS["visit"]
+        if sim:
+            VIS["votes"].append((sim, 1.0))
+        elif size >= 0.09 and f["score"] >= 0.75 and f["raw"] is not None:
+            feat = embed(img, f["raw"]); name, s, best_any = recognize(feat)
+            VIS["votes"].append((name, s))
+        votes = list(VIS["votes"]); waited = now - VIS["decide_since"]
+        if sim: who = sim
+        elif v and VIS["reverify"]:
+            who = decide(votes, waited, need_unknown=4, allow_timeout=False)
+            if who is None and waited > 5.0: who = v["key"]   # never sure: keep the current visit
+        else: who = decide(votes, waited)
+        if who and who != "unknown":
+            VIS["confidence"] = None if sim else (round(max((s for n, s in votes if n == who), default=0.0), 3) or None)
+        engaged = size >= 0.09 and now - VIS["since"] >= 0.25
+        if v and VIS["reverify"] and who:
+            VIS["reverify"] = False
+            if not (who == v["key"] or (who == "unknown" and v["key"] == GUEST)):   # someone else stepped in while the face was out of view
+                emit("visitor.changed", previous=v["key"], now=who); end_visit(now, "someone else stepped in"); v = None
+        elif v and who and who not in (v["key"], "unknown") and not VIS["reverify"]:
+            emit("visitor.changed", previous=v["key"], now=who); end_visit(now, "recognized someone else"); v = None
+        if not v and engaged and who:
+            greet = start_visit(who, now, len(faces) - 1, simulated=bool(sim))
+    elif VIS["present"] and now - VIS["last_seen"] > AWAY_S:
         end_presence(now)
-    return {"present": VIS["present"], "engaged": bool(VIS["engaged_since"]) and VIS["present"], "identity": VIS["identity"], "confidence": VIS["confidence"],
-            "session": VIS["session"], "greet": greet, "others": max(0, len(faces) - 1), "display": USERS.get(VIS["identity"], {}).get("display", "guest")}
+    v = VIS["visit"]
+    return {"present": VIS["present"], "engaged": bool(v), "identity": v["key"] if v else "unknown", "confidence": VIS["confidence"],
+            "session": RUN["id"], "visit": v["id"] if v else None, "greet": greet, "others": max(0, len(faces) - 1),
+            "display": display_of(v["key"]) if v else "—", "registered": bool(v and v["key"] in USERS)}
 
 # ───────────────────────────── Kokoro TTS + lip-sync features ─────────────────────────────
 KOKORO = None
@@ -287,8 +370,8 @@ def lip_features(samples: np.ndarray, sr: int) -> dict:
     cent = (spec * freqs).sum(axis=1) / (spec.sum(axis=1) + 1e-6)
     wide = np.clip((cent - 900) / 2600, 0, 1)
     wide[open_ < 0.08] = 0.3
-    k = np.array([0.15, 0.7, 0.15])
-    open_s = np.convolve(open_, k, mode="same"); wide_s = np.convolve(wide, np.array([0.2, 0.2, 0.2, 0.2, 0.2]), mode="same")
+    # ~60 ms smoothing: lips follow syllables (4-7 Hz), not 20 ms energy jitter, which reads as a flickering mouth
+    open_s = np.convolve(open_, np.array([0.08, 0.2, 0.44, 0.2, 0.08]), mode="same"); wide_s = np.convolve(wide, np.full(7, 1 / 7), mode="same")
     return {"frame_ms": FRAME_MS, "open": [round(float(v), 3) for v in open_s], "wide": [round(float(v), 3) for v in wide_s]}
 
 def synth(text: str) -> dict:
@@ -298,9 +381,42 @@ def synth(text: str) -> dict:
     return {"type": "speech", "text": text, "sr": sr, "pcm16": base64.b64encode(pcm).decode(),
             "dur_s": round(len(samples) / sr, 3), "synth_s": round(time.time() - t0, 3), "feats": lip_features(samples, sr)}
 
-TEXT_CALL_RE = re.compile(r"`*\b(home_action|remember_preference)\s*\(([^)]*)\)`*\s*")   # small models sometimes write the call as text
+# ───────────────────────────── Speech detection (Silero VAD, ONNX, CPU) ─────────────────────────────
+# Loudness alone cannot tell a voice from a clap, a door, dishes, music or a cat. The browser streams its mic (16 kHz) here
+# and gets a speech probability per 32 ms frame; only frames that are speech can interrupt her or become a turn.
+VAD_SR, VAD_FRAME, VAD_CTX = 16000, 512, 64
+SILERO = {"sess": None, "tabs": {}}   # per browser tab: recurrent state, last 64 samples of context, leftover samples
+def silero():
+    if SILERO["sess"] is None:
+        import onnxruntime as ort
+        o = ort.SessionOptions(); o.intra_op_num_threads = 1; o.inter_op_num_threads = 1
+        SILERO["sess"] = ort.InferenceSession(os.path.join(MODELS, "silero_vad.onnx"), o, providers=["CPUExecutionProvider"])
+    return SILERO["sess"]
+
+def vad_probs(tab: str, pcm: np.ndarray, reset: bool) -> list[float]:
+    tabs = SILERO["tabs"]; now = time.time()
+    for k in [k for k, v in tabs.items() if now - v["t"] > 300]: del tabs[k]
+    st = tabs.get(tab)
+    if st is None or reset:
+        st = tabs[tab] = {"state": np.zeros((2, 1, 128), np.float32), "ctx": np.zeros(VAD_CTX, np.float32), "rest": np.zeros(0, np.float32), "t": now}
+    st["t"] = now
+    x = np.concatenate([st["rest"], pcm]); n = len(x) // VAD_FRAME; out = []
+    sess, sr = silero(), np.array(VAD_SR, np.int64)
+    for i in range(n):
+        f = x[i * VAD_FRAME:(i + 1) * VAD_FRAME]
+        p, st["state"] = sess.run(None, {"input": np.concatenate([st["ctx"], f])[None], "state": st["state"], "sr": sr})
+        st["ctx"] = f[-VAD_CTX:]; out.append(round(float(p[0][0]), 3))
+    st["rest"] = x[n * VAD_FRAME:]
+    return out
+
+# small models sometimes write the call as text: home_action(device="music", ...) or Gemma's home_action{device:<|"|>music<|"|>, ...}
+TEXT_CALL_RE = re.compile(r"`*\b(home_action|remember_preference)\s*[({]([^)}]*)[)}]`*\s*")
+SPECIAL_TOK_RE = re.compile(r"<\|[^|<>]*\|>")
+def untok(s: str) -> str:   # Gemma's <|"|> quote token -> a real quote; any other special token is dropped
+    return SPECIAL_TOK_RE.sub("", s.replace('<|"|>', '"'))
 def text_calls(content: str) -> tuple[list[dict], str]:
-    calls = [{"name": n, "arguments": dict(re.findall(r"(\w+)\s*=\s*[\"']([^\"']*)[\"']", a))} for n, a in TEXT_CALL_RE.findall(content)]
+    content = untok(content)
+    calls = [{"name": n, "arguments": dict(re.findall(r"(\w+)\s*[=:]\s*[\"']([^\"']*)[\"']", a))} for n, a in TEXT_CALL_RE.findall(content)]
     return calls, TEXT_CALL_RE.sub("", content).strip()
 
 SENT_RE = re.compile(r"^(.*?[.!?…]+[\"')\]]*)(\s+|$)", re.S)
@@ -318,7 +434,6 @@ def pop_sentences(buf: str, final: bool, first: bool = False) -> tuple[list[str]
 
 # ───────────────────────────── Conversation ─────────────────────────────
 app = FastAPI()
-HISTORY: list[dict] = []
 METRICS: list[dict] = []
 LLM = {"think": None}   # whether the model accepts the think=false switch (probed at startup)
 TURN = {"n": 0}
@@ -328,7 +443,20 @@ class Msg(BaseModel):
     identity: str = "unknown"
     confidence: float | None = None
     others: int = 0
-    greeting: bool = False
+    greeting: bool | str = False   # True/"greet" = first greeting of this run session, "return" = came back: short fixed line, no LLM
+
+NOISE_TEXT_RE = re.compile(r"\W*((uh|um|hm|mm|ah|er|eh|oh)+[hm]*|you|thanks for watching|subtitles.*|\.+)\W*", re.I)   # what audio models hear in noise/breaths
+# On silence/noise the audio LLM tends to echo its own instruction ("What exact words are spoken in this audio?") or describe the clip.
+PROMPT_ECHO_RE = re.compile(r"(exact words|words (are|were) (spoken|said)|spoken words|this audio|the audio|audio (clip|recording|file)|transcri(be|ption|pt)|verbatim|paraphrase|no (speech|words|audio)|(is|was) (silent|silence)|inaudible|unintelligible|background noise)", re.I)
+
+@app.post("/vad")
+async def vad(request: Request):
+    """16 kHz mono int16 PCM from the browser mic -> speech probability per 32 ms frame (stateful per tab)."""
+    body = await request.body()
+    if len(body) > 64000: return JSONResponse({"error": "chunk too large"}, status_code=413)
+    tab = re.sub(r"[^a-z0-9]", "", request.headers.get("x-tab", "")[:16].lower()) or "default"
+    pcm = np.frombuffer(body[: len(body) // 2 * 2], "<i2").astype(np.float32) / 32768
+    return {"p": vad_probs(tab, pcm, request.headers.get("x-reset") == "1")}
 
 @app.post("/transcribe")
 async def transcribe(request: Request):
@@ -348,18 +476,24 @@ async def transcribe(request: Request):
         if response.is_error:
             return JSONResponse({"error": f"Ollama transcription failed ({response.status_code}): {response.text[:400]}"}, status_code=502)
         text = (response.json().get("text") or "").strip()
-        if not re.search(r"[A-Za-z0-9]", text) or re.fullmatch(r"[\[(].*[\])]", text): text = ""   # silence / "[noise]" style outputs
+        raw = text
+        if not re.search(r"[A-Za-z0-9]", text) or re.fullmatch(r"[\[(].*[\])]", text) or NOISE_TEXT_RE.fullmatch(text): text = ""   # silence / "[noise]" / filler-only outputs
+        elif PROMPT_ECHO_RE.search(text): text = ""
+        if raw and not text:
+            emit("speech.rejected", heard=raw[:120], bytes=len(audio))
         emit("speech.transcribed", text=text, bytes=len(audio))
         return {"text": text}
     except Exception as exc:
         emit("speech.transcription_error", error=repr(exc))
         return JSONResponse({"error": str(exc)}, status_code=503)
 
-async def ollama_stream(messages: list[dict], tools: bool):
+GUEST_TOOLS = [t for t in TOOLS if t["function"]["name"] != "remember_preference"]   # a guest's face is not a household profile: nothing to remember them by
+
+async def ollama_stream(messages: list[dict], tools: bool | list):
     body = {"model": MODEL, "stream": True, "keep_alive": "60m", "messages": messages,
             "options": {"num_predict": 200, "temperature": 0.3, "num_ctx": 4096}}
     if LLM["think"] is False: body["think"] = False
-    if tools: body["tools"] = TOOLS
+    if tools: body["tools"] = tools if isinstance(tools, list) else TOOLS
     async with httpx.AsyncClient(timeout=180) as c:
         async with c.stream("POST", f"{OLLAMA}/api/chat", json=body) as r:
             async for line in r.aiter_lines():
@@ -369,21 +503,43 @@ def time_of_day() -> str:
     h = datetime.now().hour
     return "morning" if h < 12 else "afternoon" if h < 17 else "evening"
 
+RETURN_TEXT = "Anything I can do for you?"
+BUILD = uuid.uuid4().hex[:8]   # changes on every server start: open pages reload instead of running stale code
+LINE_CACHE: dict[str, dict] = {}
+
+async def return_line(identity: str):
+    """The visitor came back within this run session: no second greeting, one short fixed line (same speech/lip path, no LLM)."""
+    v = VIS["visit"]
+    text = (v or {}).get("text") if v and v["key"] == identity else None
+    text = text or RETURN_TEXT
+    TURN["n"] += 1; t0 = time.time()
+    if text not in LINE_CACHE:
+        LINE_CACHE[text] = await asyncio.get_running_loop().run_in_executor(None, synth, text)
+    sp = {**LINE_CACHE[text], "first_audio_s": round(time.time() - t0, 3)}
+    history_for(identity).append({"role": "assistant", "content": text})
+    emit("turn.assistant", turn=uuid.uuid4().hex[:8], text=text, tools=[], kind="return")
+    yield json.dumps(sp) + "\n"
+    yield json.dumps({"type": "done", "turn": None, "first_token_s": None, "first_audio_s": sp["first_audio_s"], "total_s": round(time.time() - t0, 3), "tools": 0, "tool_names": [], "text": text, "kind": "return"}) + "\n"
+
 @app.post("/chat")
 async def chat(m: Msg):
     turn_id = uuid.uuid4().hex[:8]
     identity = identity_line(m.identity, m.confidence, m.others)
     label = USERS.get(m.identity, {}).get("display")
-    if m.greeting:
+    kind = "greet" if m.greeting is True else (m.greeting or "")
+    HISTORY = history_for(m.identity)
+    if kind == "return":
+        return StreamingResponse(return_line(m.identity), media_type="application/x-ndjson")
+    if kind:
         who = f"{label} just approached the mirror" if label else "an unregistered guest just approached the mirror"
         user_text = (f"({who}, it is {time_of_day()}. Greet {'them as ' + label + ' ' if label else 'them warmly without any name '}in one short sentence, "
-                     f"then ask exactly one friendly question offering something{' based on their preferences' if label else ''} (for example some music to welcome them home), then stop.)")
+                     f"then ask exactly one friendly question offering something{' based on their preferences' if label else ''} (for example some music to welcome them home), then stop. Do not say 'welcome back'.)")
     else:
         user_text = m.text
     TURN["n"] += 1; my_turn = TURN["n"]   # a newer turn makes this one stale: it must not write history or run actions any more
     HISTORY.append({"role": "user", "content": f"{identity} {user_text}"}); del HISTORY[:-24]
     while HISTORY and HISTORY[0]["role"] == "tool": del HISTORY[0]   # trimming must not leave a tool result without its call
-    emit("turn.user", turn=turn_id, text=m.text, identity=m.identity, greeting=m.greeting)
+    emit("turn.user", turn=turn_id, text=m.text, identity=m.identity, greeting=kind or False)
 
     async def gen():
         loop = asyncio.get_running_loop()
@@ -402,12 +558,13 @@ async def chat(m: Msg):
 
         def schedule(sentences):
             for s in sentences:
-                clean = re.sub(r"[*_#`]+", "", TEXT_CALL_RE.sub("", s))
+                clean = re.sub(r"[*_#`]+", "", TEXT_CALL_RE.sub("", untok(s)))
                 if clean.strip():
                     st["scheduled"] += 1; speech_q.put_nowait(loop.run_in_executor(None, synth, clean))
 
         async def run_round(messages, tools):
             content, buf, calls, ch = "", "", [], {}
+            if tools and not registered: tools = GUEST_TOOLS
             async for ch in ollama_stream(messages, tools):
                 if ch.get("error"): raise RuntimeError(f"ollama: {ch['error']}")
                 msg = ch.get("message", {})
@@ -417,7 +574,7 @@ async def chat(m: Msg):
                         st["first_tok"] = round(time.time() - t0, 3); emit("llm.first_token", turn=turn_id, latency_s=st["first_tok"])
                     content += tok; buf += tok
                     await q.put(json.dumps({"type": "token", "text": tok}) + "\n")
-                    if not re.search(r"\b(home_action|remember_preference)\s*\([^)]*$", buf):   # never speak half of a text tool call
+                    if not re.search(r"\b(home_action|remember_preference)\s*[({][^)}]*$", buf):   # never speak half of a text tool call
                         sents, buf = pop_sentences(buf, False, first=st["scheduled"] == 0); schedule(sents)
                 for tc in msg.get("tool_calls", []) or []:
                     calls.append(tc["function"])
@@ -428,7 +585,9 @@ async def chat(m: Msg):
             if not calls:
                 calls, content = text_calls(content)
                 if calls: emit("llm.text_tool_call", turn=turn_id, tools=[c["name"] for c in calls])
-            else: content = TEXT_CALL_RE.sub("", content).strip()
+            else: content = TEXT_CALL_RE.sub("", untok(content)).strip()
+            if not registered and any(c.get("name") == "remember_preference" for c in calls):
+                emit("policy.guest_tool_blocked", turn=turn_id, tool="remember_preference"); calls = [c for c in calls if c.get("name") != "remember_preference"]
             if not content.strip() and not calls:
                 emit("llm.empty_round", turn=turn_id, eval_count=ch.get("eval_count"), note="model produced neither text nor a parsable tool call")
             return content, calls
@@ -437,9 +596,10 @@ async def chat(m: Msg):
         ACTION_RE = re.compile(r"\b(play |put on|put some|turn (on|off|up|down)|switch (on|off)|dim\b|brighten|lights? (on|off)|volume|louder|quieter|pause|resume|skip|next (track|song)|stop the|set the|open the|close the|remember that)", re.I)
         AFFIRM_RE = re.compile(r"^\W*(yes|yeah|yep|sure|please|ok|okay|go ahead|do it|sounds good|why not|absolutely|of course|that would be)\b", re.I)
         prev_assistant = next((h["content"] for h in reversed(HISTORY[:-1]) if h["role"] == "assistant" and h.get("content")), "")
-        guest_private = (m.identity not in USERS) and re.search(r"\b(calendar|reminder|appointment|front door|camera|schedule)\b", m.text, re.I)
+        registered = m.identity in USERS
+        guest_private = (not registered) and re.search(r"\b(calendar|reminder|appointment|front door|camera|schedule)\b", m.text, re.I)
         CLOSER_RE = re.compile(r"\b(that'?s all|thanks|thank you|goodbye|bye|never mind|nevermind|no thanks|nothing else)\b", re.I)
-        needs_action = (not m.greeting) and not guest_private and not CLOSER_RE.search(m.text) and bool(ACTION_RE.search(m.text) or (AFFIRM_RE.match(m.text) and re.search(r"\b(would you like|shall i|should i|want me to|how about|can i)\b", prev_assistant, re.I)))
+        needs_action = (not kind) and not guest_private and not CLOSER_RE.search(m.text) and not (not registered and re.search(r"\bremember\b", m.text, re.I)) and bool(ACTION_RE.search(m.text) or (AFFIRM_RE.match(m.text) and re.search(r"\b(would you like|shall i|should i|want me to|how about|can i)\b", prev_assistant, re.I)))
 
         def live() -> bool: return TURN["n"] == my_turn
 
@@ -473,7 +633,7 @@ async def chat(m: Msg):
                         content2, _ = await run_round([{"role": "system", "content": SYSTEM}] + HISTORY, True)
                         if not live(): return
                         HISTORY.append({"role": "assistant", "content": content2}); content = (content + " " + content2).strip()
-                elif not m.greeting and (CLAIM_RE.search(content) or needs_action):
+                elif not kind and (CLAIM_RE.search(content) or needs_action):
                     emit("policy.unverified_claim" if CLAIM_RE.search(content) else "policy.missing_tool_call", turn=turn_id, text=content.strip(),
                          user_text=m.text, action="repair: forcing tool call round")
                     nudge = {"role": "user", "content": f"(system: the user asked for an action (\"{m.text}\") but you called no tool. Call the appropriate tool(s) now with valid JSON. Output no text.)"}
@@ -500,7 +660,7 @@ async def chat(m: Msg):
 
         async def filler_watchdog():  # nothing spoken after 2.5 s => model is writing tool JSON; acknowledge out loud
             await asyncio.sleep(2.5)
-            if st["scheduled"] == 0 and st["first_tok"] is None and FILLERS and not m.greeting:
+            if st["scheduled"] == 0 and st["first_tok"] is None and FILLERS and not kind and needs_action:
                 f = dict(FILLERS[int(time.time()) % len(FILLERS)]); f["filler"] = True
                 st["scheduled"] += 1; fut = loop.create_future(); fut.set_result(f); speech_q.put_nowait(fut)
                 emit("speech.filler", turn=turn_id, text=f["text"], at_s=round(time.time() - t0, 3))
@@ -524,110 +684,139 @@ class Interrupt(BaseModel):
 async def interrupt(i: Interrupt):
     return emit("speech.interrupted", reason=i.reason, stop_ms=i.stop_ms, was_saying=i.spoken_text)
 
-def end_presence(now: float):
-    VIS["present"] = False
-    emit("presence.left", after_s=round(now - VIS["since"], 1))
-    if VIS["session"]:
-        emit("session.ended", session=VIS["session"], identity=VIS["identity"], duration_s=round(now - VIS["since"], 1)); VIS["session"] = None
-    VIS["identity"] = "unknown"; VIS["confidence"] = None; VIS["votes"].clear(); VIS["engaged_since"] = 0.0; VIS["pending"] = []
-    HISTORY.clear()   # the next visitor must not inherit this conversation
-
 async def presence_watchdog():   # frames stop arriving (tab closed, camera off) => the visitor is gone
     while True:
         await asyncio.sleep(1.0)
-        if VIS["present"] and time.time() - VIS["last_seen"] > 3.0: end_presence(time.time())
+        if VIS["present"] and time.time() - VIS["last_seen"] > AWAY_S: end_presence(time.time())
+
+def reset_run(reason: str):
+    end_presence(time.time(), reason)
+    RUN.update(id=None, started=0.0, last_visitor=None); RUN["greeted"].clear()
+    HISTORIES.clear(); SIM["identity"] = None
+
+@app.post("/session/start")
+async def session_start():
+    """Start mirror: a fresh run session. Greetings, guests and conversations are remembered until /session/stop (registered users stay)."""
+    reset_run("new run session"); RUN["id"] = uuid.uuid4().hex[:8]; RUN["started"] = round(time.time(), 3)
+    emit("session.started", session=RUN["id"], registered_users=len(USERS)); return {"ok": True, "session": RUN["id"]}
+
+@app.post("/session/stop")
+async def session_stop():
+    sid = RUN["id"]; reset_run("mirror stopped"); emit("session.stopped", session=sid); return {"ok": True}
 
 @app.post("/reset")
 async def reset():
-    """Forget the conversation and the current visit (users stay registered until /users/reset)."""
-    HISTORY.clear(); VIS["greeted"].clear(); SIM["identity"] = None
-    if VIS["present"]: end_presence(time.time())
-    emit("session.reset"); return {"ok": True}
+    """Forget what was said. Who was greeted in this run session is kept, so the person in front is not greeted a second time."""
+    HISTORIES.clear()
+    emit("session.reset", session=RUN["id"]); return {"ok": True}
 
 # ───────────────────────────── Vision endpoints ─────────────────────────────
 class Frame(BaseModel):
     jpeg: str            # base64 JPEG from the browser camera
-    simulate: str | None = None   # UI override: "unknown" | user id | None (auto)
+    simulate: str | None = None   # UI override: "unknown" (a new guest) | user/guest key | None (camera recognition)
+    session: str | None = None    # the run session the sending tab started; frames from any other tab are ignored
 
 def decode_jpeg(b64: str) -> np.ndarray | None:
     try: return cv2.imdecode(np.frombuffer(base64.b64decode(b64), np.uint8), cv2.IMREAD_COLOR)
     except Exception: return None
 
+def vision_state() -> dict:
+    return {"users": {k: len(v["embeddings"]) for k, v in USERS.items()},
+            "greeted": list(RUN["greeted"]), "session": RUN["id"], "build": BUILD}
+
 @app.post("/vision/frame")
 async def vision_frame(f: Frame):
-    t = time.time()
-    img = await asyncio.get_running_loop().run_in_executor(None, decode_jpeg, f.jpeg)
-    faces = await asyncio.get_running_loop().run_in_executor(None, detect_faces, img)
+    t = time.time(); loop = asyncio.get_running_loop()
+    img = await loop.run_in_executor(None, decode_jpeg, f.jpeg)
+    faces = await loop.run_in_executor(None, detect_faces, img)
+    boxes = [{"box": d["box"], "score": d["score"]} for d in faces]
+    if not RUN["id"] or f.session != RUN["id"]:
+        # no run, or a tab whose run was replaced (another tab pressed Start): never greet from it; the tab stops itself on "stale"
+        return {"present": False, "engaged": False, "identity": "unknown", "confidence": None, "visit": None, "greet": None, "others": 0,
+                "display": "—", "registered": False, "stale": bool(f.session and f.session != RUN["id"]), "faces": boxes,
+                "ms": round((time.time() - t) * 1000, 1), **vision_state()}
     SIM["identity"] = f.simulate or None
-    if SIM["identity"] and faces:   # simulated recognition: camera presence is real, the identity is forced from the UI
-        VIS["votes"].clear(); VIS["votes"].extend([(SIM["identity"], 0.0)] * 5)
-        if VIS["identity"] != SIM["identity"]:
-            VIS["identity"] = SIM["identity"]; VIS["confidence"] = None
-    pres = presence_update(faces, img)
+    pres = presence_update(faces, img)   # on the event loop: it emits events and mutates the shared visit state
     VIS["last_faces"] = [{"box": d["box"], "score": d["score"]} for d in faces]
-    return {**pres, "faces": VIS["last_faces"], "ms": round((time.time() - t) * 1000, 1), "users": {k: len(v["embeddings"]) for k, v in USERS.items()}}
+    return {**pres, "faces": VIS["last_faces"], "ms": round((time.time() - t) * 1000, 1), **vision_state()}
 
 @app.post("/vision/simulate")
 async def vision_simulate(e: dict):
-    """No camera: fake an approach of the chosen identity through the same session logic."""
-    ident = e.get("identity") or "unknown"
-    SIM["identity"] = ident
-    VIS.update(present=True, since=time.time() - 2.5, last_seen=time.time() + 60, engaged_since=time.time() - 1)   # stays "present" ~1 min without camera frames
-    VIS["votes"].clear(); VIS["votes"].extend([(ident, 0.0)] * 5); VIS["identity"] = ident; VIS["confidence"] = None
-    if VIS["session"] and (e.get("fresh", True) or e.get("force_greet", False)): VIS["session"] = None
+    """No camera: fake an approach ({"identity": "user1" | "unknown"}) or a departure ({"leave": true}) through the same visit logic."""
+    now = time.time()
+    if e.get("leave"):
+        SIM["identity"] = None; end_presence(now, "left (simulated)")
+        return {**presence_update([], np.zeros((2, 2, 3), np.uint8)), "faces": [], **vision_state()}
+    if VIS["visit"]: end_visit(now, "simulated new approach")
+    SIM["identity"] = e.get("identity") or "unknown"
+    VIS.update(present=True, since=now - 1.0, decide_since=now - 1.0, last_seen=now + 120, reverify=False)   # stays "present" ~2 min without camera frames
     emit("presence.detected", faces=1, size=0.2, simulated=True)
     pres = presence_update([{"box": [0.4, 0.3, 0.2, 0.27], "score": 0.99, "raw": None}], np.zeros((2, 2, 3), np.uint8))
-    return pres
+    VIS["last_seen"] = now + 120
+    return {**pres, "faces": [], **vision_state()}
 
 class Snapshot(BaseModel):
     frames: list[str]
+    role: str = "user"   # only "user": the Snapshot → User button is the one way anyone gets registered
 
 @app.post("/users/snapshot")
 async def users_snapshot(s: Snapshot):
-    """Register the face in front of the camera as the next User N (explicit button). Embeddings only, runtime memory."""
+    """Snapshot → User: the only way a face gets registered. Embeddings only, runtime memory. A registered face is never registered twice;
+    the guest currently in front snapshotted as a user becomes User N and keeps their greeting state and conversation."""
     def work():
         feats = []
         for b64 in s.frames[:12]:
             img = decode_jpeg(b64); faces = detect_faces(img)
-            if faces and faces[0]["box"][2] >= 0.1:
+            if faces and faces[0]["box"][2] >= 0.09:
                 feats.append([round(float(v), 5) for v in embed(img, faces[0]["raw"]).flatten()])
-        return feats
-    feats = await asyncio.get_running_loop().run_in_executor(None, work)
+        return feats, [recognize(np.array(f, dtype=np.float32).reshape(1, -1)) for f in feats]
+    feats, matches = await asyncio.get_running_loop().run_in_executor(None, work)
     if len(feats) < 3:
         return JSONResponse({"ok": False, "error": f"need a clear face in at least 3 frames, got {len(feats)}"}, status_code=400)
-    known, score = recognize(np.array(feats[-1], dtype=np.float32).reshape(1, -1))
-    if known != "unknown":
+    counts = collections.Counter(k for k, _, _ in matches if k != "unknown")
+    known = counts.most_common(1)[0][0] if counts and counts.most_common(1)[0][1] >= max(2, len(feats) // 3) else "unknown"
+    score = max((sc for k, sc, _ in matches if k == known), default=None)
+    v = VIS["visit"]; single = len(VIS["last_faces"]) <= 1
+    current_guest = bool(v and v["key"] == GUEST and single)
+    if s.role != "user":
+        return JSONResponse({"ok": False, "error": "only Snapshot → User registers a face; guests are never stored"}, status_code=400)
+    if known in USERS:
         emit("user.already_registered", identity=known, confidence=score)
         return {"ok": True, "identity": known, "display": USERS[known]["display"], "already": True, "confidence": score}
-    u = register_user(feats, "snapshot button"); uid = next(k for k, v in USERS.items() if v is u)
-    VIS["votes"].clear(); VIS["identity"] = "unknown"; VIS["pending"] = []
-    return {"ok": True, "identity": uid, "display": u["display"], "samples": len(u["embeddings"])}
+    uid = register_user(feats, "snapshot button")
+    if current_guest: rename_visitor(GUEST, uid); emit("guest.promoted", previous=GUEST, identity=uid)
+    VIS["votes"].clear()
+    return {"ok": True, "identity": uid, "display": USERS[uid]["display"], "samples": len(USERS[uid]["embeddings"]), "was": GUEST if current_guest else None}
 
 @app.post("/users/simulate")
 async def users_simulate():
     """No camera: register a placeholder User N with no face samples, so scenarios can run as a registered user."""
-    u = register_user([], "simulated (no camera)"); uid = next(k for k, v in USERS.items() if v is u)
-    return {"ok": True, "identity": uid, "display": u["display"]}
+    uid = register_user([], "simulated (no camera)")
+    return {"ok": True, "identity": uid, "display": USERS[uid]["display"]}
 
 @app.get("/users")
 async def users_list():
-    return {"auto_remember": AUTO["remember"], "users": {k: {"display": v["display"], "samples": len(v["embeddings"]), "prefs": v["prefs"], "how": v["how"], "registered_at": v["registered_at"]} for k, v in USERS.items()}}
+    return {"session": RUN["id"], "greeted": list(RUN["greeted"]), "last_visitor": RUN["last_visitor"],
+            "current": VIS["visit"]["key"] if VIS["visit"] else None,
+            "users": {k: {"display": v["display"], "samples": len(v["embeddings"]), "prefs": v["prefs"], "how": v["how"], "registered_at": v["registered_at"]} for k, v in USERS.items()}}
 
 @app.post("/users/reset")
 async def users_reset():
-    n = len(USERS); USERS.clear(); VIS["greeted"].clear(); VIS["votes"].clear(); VIS["identity"] = "unknown"; VIS["pending"] = []; HISTORY.clear()
+    n = len(USERS)
+    if VIS["visit"] and VIS["visit"]["key"] in USERS: end_visit(time.time(), "users forgotten")
+    for k in list(USERS): RUN["greeted"].pop(k, None); HISTORIES.pop(k, None)
+    USERS.clear(); VIS["votes"].clear()
     emit("users.reset", forgotten=n); return {"ok": True, "forgotten": n}
 
 @app.post("/users/forget")
 async def users_forget(e: dict):
     uid = e.get("identity")
     if uid in USERS:
-        USERS.pop(uid); VIS["greeted"].pop(uid, None); emit("user.forgotten", identity=uid)
+        if VIS["visit"] and VIS["visit"]["key"] == uid: end_visit(time.time(), "forgotten")
+        USERS.pop(uid); RUN["greeted"].pop(uid, None); HISTORIES.pop(uid, None); VIS["votes"].clear()
+        emit("user.forgotten", identity=uid)
     return {"ok": True}
 
-@app.post("/users/auto")
-async def users_auto(e: dict):
-    AUTO["remember"] = bool(e.get("enabled", True)); emit("users.auto_remember", enabled=AUTO["remember"]); return {"auto_remember": AUTO["remember"]}
 
 # ───────────────────────────── Mock action executor + event stream ─────────────────────────────
 def run_action(body: dict) -> dict:
@@ -658,10 +847,26 @@ async def events(request: Request):
 @app.get("/metrics")
 async def metrics(): return METRICS
 
+@app.post("/scenarios/log")
+async def scenarios_log(e: dict):
+    """The browser runs scenario steps (it owns audio and the camera) and reports each verdict here so it lands in the event stream."""
+    kind = re.sub(r"[^a-z_]", "", str(e.pop("kind", "step")).lower()) or "step"
+    data = {k: v for k, v in e.items() if re.fullmatch(r"[a-z_]+", str(k)) and k not in ("id", "ts", "type", "type_")}
+    return emit("scenario." + kind, **data)
+
+@app.post("/client/log")
+async def client_log(e: dict):
+    """Rendering problems seen in the browser (GPU context lost/restored, frame errors), so they show up in the event stream and logs."""
+    kind = re.sub(r"[^a-z_]", "", str(e.pop("kind", "note")).lower()) or "note"
+    data = {k: str(v)[:300] for k, v in e.items() if re.fullmatch(r"[a-z_]+", str(k)) and k not in ("id", "ts", "type")}
+    return emit("avatar." + kind, **data)
+
 @app.on_event("startup")
 async def warm():
     loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, silero)
     for t in FILLER_TEXTS: FILLERS.append(await loop.run_in_executor(None, synth, t))
+    LINE_CACHE[RETURN_TEXT] = await loop.run_in_executor(None, synth, RETURN_TEXT)   # the return line plays instantly
     asyncio.create_task(presence_watchdog())
     print(f"READY model={MODEL} voice={VOICE} ollama={OLLAMA}", flush=True)
     try:

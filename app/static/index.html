@@ -2,67 +2,105 @@
 <style>
 :root{--bg:#07070a;--panel:#111118;--line:#23232e;--txt:#e8e8ee;--dim:#8a8a99;--acc:#6fd3ff;--ok:#7ef0a0;--warn:#ffd36f;--err:#ff7d7d;--vio:#c08fff}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,system-ui,sans-serif;display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;padding:16px;height:100vh;overflow:hidden}
-#stage{position:relative;height:min(calc(100vh - 140px),924px);aspect-ratio:941/1672;width:auto;align-self:flex-start;flex-shrink:0;border-radius:22px;overflow:hidden;background:#000;box-shadow:0 10px 60px #000c}
-#stage canvas{position:absolute;inset:0;width:100%;height:100%}
-#veil{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 30%,#0b0d12 0%,#05060a 70%);opacity:.94;transition:opacity 1.6s ease;pointer-events:none}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,system-ui,sans-serif;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px;padding:14px;height:100vh;overflow:hidden}
+/* left third: avatar + controls underneath */
+#left{display:flex;flex-direction:column;align-items:center;gap:10px;min-height:0;min-width:0}
+#stage{position:relative;flex:none;border-radius:20px;background:#0c0a0a}   /* no overflow clip: one less GPU layer that can drop out */
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;border-radius:20px}
+#status{border-radius:0 0 20px 20px}
+#veil{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 30%,#0b0d12 0%,#05060a 70%);opacity:0;display:none;pointer-events:none}
 #veil::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,#ffffff00 40%,#ffffff10 50%,#ffffff00 60%)}
-#ring{position:absolute;inset:0;border-radius:22px;border:3px solid transparent;pointer-events:none;transition:border-color .3s}
-#ring.listening{border-color:#6fd3ff99;animation:pulse 1.6s infinite}#ring.user{border-color:#6fd3ff}
-#ring.speaking{border-color:#ffd36f66}#ring.thinking{border-color:#c08fff77}
-@keyframes pulse{0%,100%{box-shadow:inset 0 0 0 0 #6fd3ff33}50%{box-shadow:inset 0 0 18px 0 #6fd3ff22}}
-#stage #cam{position:absolute;inset:auto;left:12px;bottom:12px;width:150px;height:112px;border-radius:10px;border:1px solid #ffffff33;background:#000;object-fit:cover}
-#camlbl{position:absolute;left:12px;bottom:128px;font:11px ui-monospace,monospace;color:#cfd;background:#0008;padding:2px 6px;border-radius:6px}
-#status{position:absolute;left:0;right:0;bottom:0;text-align:center;font:600 13px system-ui;letter-spacing:.06em;text-transform:uppercase;color:#fffc;padding:10px;background:linear-gradient(#0000,#0008);pointer-events:none}
-#left{display:flex;flex-direction:column;gap:10px;min-height:0;width:fit-content;max-width:560px}
-#controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-button{font:13px system-ui;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:#1a1a24;color:var(--txt);cursor:pointer}
-button.primary{background:#1d4b66;border-color:#2a6b90}button:hover{filter:brightness(1.15)}button:disabled{opacity:.4}
+/* no glow, outline or overlay around/over the avatar: the state is shown only by the label at the bottom. (In VS Code's browser
+   a near-opaque border on a full-stage overlay also made the compositor drop the avatar canvas: a black stage.) */
+#status{position:absolute;left:0;right:0;bottom:0;text-align:center;font:600 12px system-ui;letter-spacing:.06em;text-transform:uppercase;color:#fffc;padding:9px;background:linear-gradient(#0000,#0009);pointer-events:none}
+#controls{display:flex;flex-direction:column;gap:7px;width:100%;flex:none}
+#controls .row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+#controls .row>*{flex:1 1 auto}
+button{font:13px system-ui;padding:7px 11px;border-radius:10px;border:1px solid var(--line);background:#1a1a24;color:var(--txt);cursor:pointer;white-space:nowrap}
+button.primary{background:#1d4b66;border-color:#2a6b90}button.danger{background:#4a1d24;border-color:#7a2d38}button:hover{filter:brightness(1.15)}button:disabled{opacity:.4;cursor:default}
 button.sm{padding:4px 8px;font-size:12px}
-select,input.sm{font:13px system-ui;padding:7px;border-radius:10px;background:#1a1a24;color:var(--txt);border:1px solid var(--line)}
-#side{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0;overflow:auto}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:0;display:flex;flex-direction:column;flex-shrink:0}
-.panel h3{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);display:flex;justify-content:space-between;gap:8px}
-#vis{display:flex;gap:14px;font:12px ui-monospace,monospace;color:var(--dim);flex-wrap:wrap;align-items:center}#vis b{color:var(--txt)}#vis .on{color:var(--ok)}
-#users{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-.user{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12.5px}.user b{color:var(--acc)}.user small{display:block;color:var(--dim)}
-#chat{overflow:auto;height:170px;font-size:14px}
-#chat p{margin:5px 0}.u{color:#9ccfff}.u::before{content:"you  ";color:var(--dim);font-size:11px}
+select,input.sm{font:13px system-ui;padding:6px;border-radius:10px;background:#1a1a24;color:var(--txt);border:1px solid var(--line);min-width:0}
+#hint{font-size:11.5px;color:var(--dim);text-align:center}
+/* right two thirds: two columns of panels */
+#side{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;min-height:0;min-width:0}
+.col{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px;min-height:0;display:flex;flex-direction:column}
+.panel.grow{flex:1 1 0}
+.panel h3{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);display:flex;justify-content:space-between;gap:8px;flex:none}
+.panel h3 span{text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;text-align:right}
+#face{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(150px,1fr);gap:10px;align-items:start}
+#cam{width:100%;aspect-ratio:4/3;height:auto;border-radius:10px;border:1px solid #ffffff22;background:#000;display:block}
+#camlbl{font:11px ui-monospace,monospace;color:#cfd;margin-top:4px}
+#vis{display:grid;grid-template-columns:auto minmax(0,1fr);gap:1px 8px;font:12px ui-monospace,monospace;color:var(--dim)}#vis b{color:var(--txt);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#vis .on{color:var(--ok)}
+#facebtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;flex:none}
+#people{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;max-height:170px;overflow:auto;align-content:flex-start}
+.user button{margin-top:3px}
+.user{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:5px 9px;font-size:12px}.user b{color:var(--acc)}.user.g b{color:#d9c3ff}.user.cur{border-color:var(--ok)}.user small{display:block;color:var(--dim)}
+.tag{font-size:10.5px;padding:0 5px;border-radius:6px;background:#1f2b22;color:var(--ok);margin-left:4px}
+#chat{overflow:auto;flex:1 1 0;min-height:60px;font-size:13.5px}
+#chat p{margin:4px 0}.u{color:#9ccfff}.u::before{content:"you  ";color:var(--dim);font-size:11px}
 .a{color:#ffe2b8}.a::before{content:"aria ";color:var(--dim);font-size:11px}
 .sys{color:var(--dim);font-size:12px;font-family:ui-monospace,monospace}
-#events{overflow:auto;height:210px;word-break:break-all;font:11.5px ui-monospace,monospace;white-space:pre-wrap;color:#b8b8c8}
-#events .t{color:#555}#events .tool_call\.requested{color:var(--warn)}#events .device\.state_changed{color:var(--ok)}#events .ha\.request{color:#ffb86f}
-#events .speech\.interrupted,#events .turn\.error,#events .tool_call\.failed,#events .scenario\.fail{color:var(--err)}#events .turn\.user{color:#9ccfff}#events .turn\.assistant{color:#ffe2b8}
+#scen{overflow:auto;flex:1 1 0;min-height:60px;display:flex;flex-direction:column;gap:8px}
+.sc{background:#0b0b10;border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:12.5px}
+.sc b{color:var(--txt)}.sc i{display:block;color:var(--dim);font-size:11.5px;font-style:normal}.sc .say{display:block;color:#9ccfff;font-size:11.5px;font-family:ui-monospace,monospace}
+.sc .hd{display:flex;justify-content:space-between;gap:8px;align-items:start}
+.sc .res{white-space:pre-wrap;font:11px ui-monospace,monospace;color:#b8b8c8;margin-top:4px}.pass{color:var(--ok)}.fail{color:var(--err)}
+#events{overflow:auto;flex:1 1 0;min-height:60px;word-break:break-all;font:11px ui-monospace,monospace;white-space:pre-wrap;color:#b8b8c8}
+#events .t{color:#555}#events .action\.mock{color:var(--warn)}
+#events .speech\.interrupted,#events .turn\.error,#events .action\.failed,#events .scenario\.fail{color:var(--err)}#events .turn\.user{color:#9ccfff}#events .turn\.assistant{color:#ffe2b8}
 #events .llm\.first_token,#events .turn\.cancelled,#events .policy\.unverified_claim,#events .policy\.missing_tool_call,#events .policy\.repaired{color:var(--vio)}
-#events .presence\.detected,#events .session\.started,#events .identity\.confirmed,#events .user\.registered,#events .scenario\.pass{color:#8fe3ff}#events .presence\.left,#events .session\.ended,#events .greeting\.suppressed,#events .identity\.unknown{color:#7a9}
-#metrics{display:flex;gap:14px;font:12px ui-monospace,monospace;color:var(--dim);flex-wrap:wrap}#metrics b{color:var(--txt)}
-input#txt{font:14px system-ui;padding:10px;width:100%;border-radius:10px;border:1px solid var(--line);background:#0b0b10;color:var(--txt)}
+#events .presence\.detected,#events .visit\.started,#events .session\.started,#events .user\.registered,#events .guest\.promoted,#events .scenario\.pass{color:#8fe3ff}
+#events .presence\.left,#events .visit\.ended,#events .session\.stopped,#events .greeting\.suppressed,#events .visitor\.changed{color:#7a9}
+#metrics{display:flex;gap:12px;font:11.5px ui-monospace,monospace;color:var(--dim);flex-wrap:wrap;margin-top:6px;flex:none}#metrics b{color:var(--txt)}
+input#txt{font:14px system-ui;padding:8px 10px;width:100%;border-radius:10px;border:1px solid var(--line);background:#0b0b10;color:var(--txt);margin-top:6px}
 small{color:var(--dim)} label.sw{font-size:12px;color:var(--dim);display:flex;gap:4px;align-items:center}
 </style></head><body>
 <div id=left>
-<div id=stage>
-  <canvas id=cav></canvas><canvas id=gl></canvas><div id=veil></div><div id=ring></div>
-  <canvas id=cam width=320 height=240></canvas><div id=camlbl>camera off</div>
-  <div id=status>mirror</div>
-</div>
-<div id=controls>
-  <button id=start class=primary>▶ Start mirror (camera + mic + audio)</button>
-  <button id=stop>⏹ Interrupt</button>
-  <select id=who><option value="">Identity: camera (auto)</option><option value=unknown>Simulate: guest (unknown)</option></select>
-  <button id=approach title="no camera? fake an approach">Simulate approach</button>
-  <button id=reset title="forget the conversation and current visit">↺ conversation</button>
-</div>
-<small>Chrome. Just talk — speak over her any time to interrupt. Speech is transcribed locally by Ollama. Face embeddings and preferences stay in process memory only and are cleared when the container restarts.</small>
+  <div id=stage>
+    <canvas id=out></canvas><div id=veil></div>
+    <div id=status>waiting for you</div>
+  </div>
+  <div id=controls>
+    <div class=row>
+      <button id=start class=primary>▶ Start mirror</button>
+      <button id=stopm class=danger disabled>■ Stop</button>
+      <button id=stop title="stop her speaking now">⏹ Interrupt</button>
+      <button id=reset title="forget conversations and who was greeted in this run session">↺ Conversation</button>
+    </div>
+    <div class=row>
+      <select id=who title="who the camera sees (or who a simulated approach is)"></select>
+      <button id=approach title="no camera? fake an approach">Simulate approach</button>
+      <button id=leave title="fake the visitor walking away">Simulate leave</button>
+    </div>
+    <div id=hint>Chrome · camera + mic + speakers. Start, step in front of the camera, wait for her greeting, then just talk.</div>
+  </div>
 </div>
 <div id=side>
-  <div class=panel><h3>Vision · presence, identity, users <span>YuNet + SFace · local · runtime only</span></h3>
-    <div id=vis>present <b id=v_p>no</b> identity <b id=v_i>—</b> match <b id=v_c>—</b> session <b id=v_s>—</b> faces <b id=v_f>0</b> frame <b id=v_ms>—</b>
-      <button class=sm id=snap title="register the face in front of the camera as the next User N">📷 Snapshot my face</button>
-      <label class=sw><input type=checkbox id=auto> auto-remember on approach</label>
-      <button class=sm id=ureset>Forget all users</button></div>
-    <div id=users><span class=sys>no users registered — approach the camera or press Snapshot</span></div></div>
-  <div class=panel><h3>Conversation</h3><div id=chat></div><input id=txt placeholder="…or type here (Enter). Typing also interrupts."><div id=mic class=sys>mic off</div></div>
-  <div class=panel><h3>Event stream <span>mock actions are only logged here and in the browser console</span></h3><div id=events></div><div id=metrics style="margin-top:8px"></div></div>
+  <div class=col>
+    <div class=panel><h3>Face control <span>YuNet + SFace · local · memory only</span></h3>
+      <div id=face>
+        <div><canvas id=cam width=320 height=240></canvas><div id=camlbl>camera off</div></div>
+        <div>
+          <div id=vis>
+            <span>run</span><b id=v_run>—</b><span>present</span><b id=v_p>no</b><span>visitor</span><b id=v_i>—</b><span>match</span><b id=v_c>—</b>
+            <span>visit</span><b id=v_s>—</b><span>faces</span><b id=v_f>0</b><span>frame</span><b id=v_ms>—</b>
+          </div>
+        </div>
+      </div>
+      <div id=facebtns>
+        <button class=sm id=snapu title="register the face in front of the camera as a household user (User N)">📷 Snapshot → User</button>
+        <button class=sm id=ureset>Forget all users</button>
+      </div>
+      <div id=people><span class=sys>no users registered — Start, look at the camera and press "Snapshot as User"</span></div>
+    </div>
+    <div class="panel grow"><h3>Conversation <span id=mic>mic off</span></h3><div id=chat></div><input id=txt placeholder="…or type here (Enter). Typing also interrupts."></div>
+  </div>
+  <div class=col>
+    <div class="panel grow"><h3>Scenarios <span>simulated approaches · each starts a fresh run session · expected vs actual</span></h3><div id=scen></div></div>
+    <div class="panel grow"><h3>Event stream <span>mock actions are only logged</span></h3><div id=events></div><div id=metrics></div></div>
+  </div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
@@ -70,12 +108,25 @@ const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t, sstep=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 const noise=(t,s)=>(Math.sin(t*0.37+s)+Math.sin(t*0.83+s*1.7)*0.6+Math.sin(t*1.31+s*2.9)*0.3)/1.9;   // smooth, non-repeating-looking, -1..1
 // ═══════════════════════════ AVATAR: one deformable mesh over the portrait (WebGL) ═══════════════════════════
+const SWAY_CM=10;          // organic left-right travel of the head (total range), the body follows less, hips least
+const FACE_CM=14;          // real width between the cheek landmarks 234/454: converts cm to portrait pixels
+const STRAIGHTEN=0.16;     // rad: the portrait's head is rolled ~13°; carry it close to upright (~4° left, still natural)
+const OVERSCAN=40;         // portrait px hidden at each side, so sway never reveals the stage edge
+const GLOBAL_SWAY=0.25;    // share of the sway that moves the whole picture (<= OVERSCAN px); the rest bends the figure, pinned at the frame
 const IMG=new Image(); IMG.src='avatar.png';
-let MESH=null, P=null, N=0, NF=0;
-fetch('avatar_mesh.json').then(r=>r.json()).then(m=>{MESH=m;initMesh();});
-const stage=$('#stage'), glc=$('#gl'), cavc=$('#cav'), cav=cavc.getContext('2d');
-const gl=glc.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:true});   // premultiplied: MSAA edges against the transparent mouth hole would otherwise render as a dark fringe
-let prog, bufPos, bufUV, tex, uM, verts, uvs, NTRI=0;
+let MESH=null, P=null, N=0, NF=0, VIEW=null;
+fetch('avatar_mesh.json').then(r=>r.json()).then(m=>{MESH=m;initMesh();fit();});
+// the WebGL face and the mouth layer are drawn on canvases that are NOT in the page: only the 2D #out is composited
+const stage=$('#stage'), cavc=document.createElement('canvas'), cav=cavc.getContext('2d',{willReadFrequently:true});
+// What is on screen is #out, a plain (GPU-composited) 2D canvas, the same kind as the camera preview: each frame the mouth layer and the
+// WebGL face are copied into it. Never willReadFrequently/getImageData on it: a CPU-backed canvas is what VS Code's browser showed as a
+// dark block under load, while the camera canvas next to it kept working. Blank frames are detected on the WebGL buffer instead.
+const outc=$('#out'), outg=outc.getContext('2d',{alpha:true});
+// preserveDrawingBuffer: VS Code's integrated browser "pauses" the page whenever a workbench overlay (hover, menu, notification, chat UI)
+// overlaps it and shows a screenshot instead; without a preserved buffer that screenshot has a black hole where the avatar is
+const GL_OPTS={alpha:true,premultipliedAlpha:true,antialias:true,preserveDrawingBuffer:true,powerPreference:'low-power'};
+let glc=document.createElement('canvas'), gl=glc.getContext('webgl',GL_OPTS);   // premultiplied: MSAA edges against the transparent mouth hole would otherwise render as a dark fringe
+let prog, bufPos, bufUV, tex, uM, verts, uvs, NTRI=0, texReady=false;
 const LOWER_LIP=[146,91,181,84,17,314,405,321,375,95,88,178,87,14,317,402,318,324, 77,90,180,85,16,315,404,320,307, 96,89,179,86,15,316,403,319,325], UPPER_LIP=[185,40,39,37,0,267,269,270,409,191,80,81,82,13,312,311,310,415];   // lower lip: all four mesh rings, so it moves as one piece
 const CORNERS=[61,291,78,308,62,292,76,306];
 const BROWS=[70,63,105,66,107,46,53,52,65,55,300,293,334,296,336,276,283,282,295,285], BROWS_IN=[107,66,55,336,296,285];
@@ -83,29 +134,33 @@ const LIDR_U=[173,157,158,159,160,161,246], LIDR_L=[155,154,153,145,144,163,7], 
 const LIDL_U=[398,384,385,386,387,388,466], LIDL_L=[382,381,380,374,373,390,249], CRS_L=[414,286,258,257,259,260,467];
 let F={};
 function initMesh(){
-  const m=MESH; N=m.pts.length; P=m.pts; NF=m.n_face;
+  const m=MESH; N=m.pts.length; P=m.pts; NF=m.n_face; const W=m.w, H=m.h;
+  VIEW={x:OVERSCAN,y:OVERSCAN*0.6,w:W-2*OVERSCAN,h:H-1.2*OVERSCAN};
   const pt=i=>P[i];
   const top=pt(10), chin=pt(152), l=pt(234), r=pt(454);
   let dx=chin[0]-top[0], dy=chin[1]-top[1], L=Math.hypot(dx,dy); F.down=[dx/L,dy/L]; F.right=[-F.down[1],F.down[0]];
-  F.faceH=L; F.faceW=Math.hypot(r[0]-l[0],r[1]-l[1]);
+  F.faceH=L; F.faceW=Math.hypot(r[0]-l[0],r[1]-l[1]); F.pxcm=F.faceW/FACE_CM; F.swayPx=SWAY_CM/2*F.pxcm;
   F.M=[(pt(13)[0]+pt(14)[0])/2,(pt(13)[1]+pt(14)[1])/2];
   F.mw=Math.hypot(pt(291)[0]-pt(61)[0],pt(291)[1]-pt(61)[1])/2;
   F.C=[(l[0]+r[0])/2,(l[1]+r[1])/2];
-  F.pivot=[F.C[0]+F.down[0]*F.faceH*0.95,F.C[1]+F.down[1]*F.faceH*0.95];   // neck base
+  F.pivot=[chin[0]+F.down[0]*F.faceH*0.3,chin[1]+F.down[1]*F.faceH*0.3];   // upper neck: the head turns/tilts on the neck, not around the collarbone
+  // the local face frame (right, down) is mirrored relative to the screen: a positive screen-space roll is negative here
+  F.rollSign=Math.sign(F.right[0]*F.down[1]-F.right[1]*F.down[0]);
   const loc=(p,o)=>[ (p[0]-o[0])*F.right[0]+(p[1]-o[1])*F.right[1], (p[0]-o[0])*F.down[0]+(p[1]-o[1])*F.down[1] ];
   F.uv=P.map(p=>loc(p,F.M)); F.cuv=P.map(p=>loc(p,F.C));
   const chinV=F.uv[152][1];
   const inSet=(arr)=>{const s=new Set(arr);return i=>s.has(i);};
   const isLower=inSet(LOWER_LIP), isUpper=inSet(UPPER_LIP), isUpperMid=inSet([183,42,41,38,12,268,272,271,407,184,74,73,72,11,302,303,304,408]), isCorner=inSet(CORNERS), isBrow=inSet(BROWS), isBrowIn=inSet(BROWS_IN);
   const browV=BROWS.reduce((a,i)=>a+F.cuv[i][1],0)/BROWS.length;
-  F.w={head:new Float32Array(N),jaw:new Float32Array(N),lift:new Float32Array(N),corner:new Float32Array(N),cheek:new Float32Array(N),brow:new Float32Array(N),browIn:new Float32Array(N),z:new Float32Array(N)};
+  F.w={head:new Float32Array(N),jaw:new Float32Array(N),lift:new Float32Array(N),corner:new Float32Array(N),cheek:new Float32Array(N),brow:new Float32Array(N),browIn:new Float32Array(N),z:new Float32Array(N),body:new Float32Array(N),hair:new Float32Array(N)};
+  const neckY=chin[1]+0.15*F.faceH;
   for(let i=0;i<N;i++){
     const [u,v]=F.uv[i], [cu,cv]=F.cuv[i];
     F.w.head[i]=m.head[i]; F.w.z[i]=P[i][2];
-    let wj=0;   // jaw: lower lip + chin + under-chin, fading toward the neck and sideways
+    let wj=0;   // jaw: lower lip + chin; stops right under the chin so the neck never stretches with the mouth
     const lens=0.1+0.9*Math.pow(1-Math.pow(clamp(Math.abs(u)/F.mw,0,1),2),0.9);   // lips part as a lens: full at the center, closing smoothly into the corners
     if(isLower(i)) wj=lens; else if(isCorner(i)) wj=0.5*lens; else if(isUpper(i)) wj=0;
-    else if(v>0){ const wv=v<=chinV+12?sstep(0,3,v):1-sstep(chinV+12,chinV+70,v); const wu=1-sstep(F.mw*1.25,F.mw*2.4,Math.abs(u)); wj=wv*wu; if(v<F.uv[17][1]) wj=Math.min(wj,lens); }   // everything below the lip line rides the jaw, so the lower lip keeps its thickness
+    else if(v>0){ const wv=v<=chinV?sstep(0,3,v):1-sstep(chinV,chinV+0.12*F.faceH,v); const wu=1-sstep(F.mw*1.25,F.mw*2.3,Math.abs(u)); wj=wv*wu; if(v<F.uv[17][1]) wj=Math.min(wj,lens); }
     F.w.jaw[i]=wj;
     const inner=i>=80&&i<=82||i===13||i>=310&&i<=312||i===415||i===191, mid=isUpperMid(i);
     F.w.lift[i]=(isUpper(i)?(inner?1:0.6):mid?0.82:(v<0&&v>-24&&Math.abs(u)<F.mw*1.1&&i<NF?0.3*(1-Math.abs(u)/(F.mw*1.1)):0))*(0.35+0.65*lens);
@@ -114,10 +169,20 @@ function initMesh(){
     F.w.cheek[i]=(v<2&&Math.abs(u)>F.mw*0.5&&i<NF)?Math.exp(-((dc/(F.mw*1.5))**2)):0;
     F.w.brow[i]=isBrow(i)?1:(i<NF&&cv<browV+10?(cv<browV?Math.max(0,1-(browV-cv)/70):0.6):0)*(Math.abs(cu)<F.faceW*0.55?1:0);
     F.w.browIn[i]=isBrowIn(i)?1:(isBrow(i)?0.3:0);
+    // body sway: head/neck/shoulders travel fully, the body less toward the hips; the image border is pinned (hidden by the overscan)
+    const x=P[i][0], y=P[i][1], t=clamp((y-neckY)/(H-neckY),0,1);
+    F.w.body[i]=(1-sstep(0,1,t))*sstep(0,130,Math.min(x,W-1-x));
+    // hair: outside the face, the further from the skull the freer it swings (loose strands and curls lag the head a little)
+    if(i>=NF){ const d=Math.hypot(cu/(0.5*F.faceW),(cv+0.08*F.faceH)/(0.62*F.faceH)); F.w.hair[i]=sstep(1.0,1.75,d)*clamp(m.head[i]*1.4,0,1); }
   }
   F.lids=[]; for(let k=0;k<7;k++){F.lids.push([LIDR_U[k],LIDR_L[k],CRS_R[k]]);F.lids.push([LIDL_U[k],LIDL_L[k],CRS_L[k]]);}
   const T=m.tris.filter(t=>t[3]!==3); NTRI=T.length; MESH.T=T;
   verts=new Float32Array(NTRI*6); uvs=new Float32Array(NTRI*6);
+  initGL();
+  verts.fill(0); X=new Float32Array(N*2); LID=new Float32Array(N*2);
+}
+function initGL(){   // also runs again after the browser drops the WebGL context (GPU reset, sleep, memory pressure)
+  texReady=false; if(!gl||gl.isContextLost()) return;
   const vs=`attribute vec2 aPos;attribute vec2 aUV;uniform mat3 uM;varying vec2 vUV;void main(){vec3 p=uM*vec3(aPos,1.0);gl_Position=vec4(p.xy,0.0,1.0);vUV=aUV;}`;
   const fs=`precision mediump float;uniform sampler2D uTex;varying vec2 vUV;void main(){gl_FragColor=texture2D(uTex,vUV);}`;
   const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(o));return o;};
@@ -129,24 +194,44 @@ function initMesh(){
   tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,tex);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-  const up=()=>{gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,IMG);};
-  if(IMG.complete&&IMG.naturalWidth) up(); else IMG.onload=up;
+  const up=()=>{gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,IMG);texReady=true;};
+  if(IMG.complete&&IMG.naturalWidth) up(); else IMG.addEventListener('load',up);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 }
-// ───────── animation state: A = current (smoothed), targets computed every frame from behaviour ─────────
-const A={open:0,wide:0.3,env:0,yaw:0,pitch:0,roll:0,blink:0.9,smile:0.1,brow:0,browIn:0,gazeX:0,gazeY:0,bob:0,sway:0,breath:0,nod:0};
+// The GPU process can reset under load (camera + mic + WebGL). Never show a black stage: the portrait is the stage background,
+// a lost WebGL context is restored or the canvas is replaced with a fresh one, and every incident is logged to the server.
+const TAB=Math.random().toString(36).slice(2,6);
+function clientLog(kind,data={}){ try{ fetch('/client/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,...data,state,tab:TAB})}); }catch{} }
+let glLostAt=0, glRebuilds=0;
+function watchGL(c){
+  c.addEventListener('webglcontextlost',e=>{ e.preventDefault(); texReady=false; glLostAt=performance.now(); console.warn('WebGL context lost'); clientLog('gl_lost',{rebuilds:glRebuilds}); });
+  c.addEventListener('webglcontextrestored',()=>{ glLostAt=0; if(MESH) initGL(); console.warn('WebGL context restored'); clientLog('gl_restored'); });
+}
+watchGL(glc);
+function rebuildGL(){   // the browser did not restore the context: a brand-new canvas gets a brand-new context
+  const n=document.createElement('canvas'); n.width=glc.width; n.height=glc.height; glc=n;
+  gl=glc.getContext('webgl',GL_OPTS); watchGL(glc); glRebuilds++; glLostAt=gl&&!gl.isContextLost()?0:performance.now();
+  if(gl&&!gl.isContextLost()&&MESH) initGL(); clientLog('gl_rebuilt',{ok:!!gl&&!gl.isContextLost(),rebuilds:glRebuilds});
+}
+for(const ev of ['contextlost','contextrestored']) cavc.addEventListener(ev,()=>clientLog('canvas2d_'+ev.slice(7)));
+// ───────── animation state: A = current (smoothed); targets computed every frame from behaviour ─────────
+const A={open:0,wide:0.3,env:0,yaw:0,pitch:0,roll:0,blink:0.9,smile:0.1,brow:0,browIn:0,gazeX:0,gazeY:0,bob:0,breath:0,nod:0};
+const SW={x:0,v:0}, HAIR={x:0,v:0};   // body sway (-1..1) and the hair's lagging position (px), both springs
 let state='asleep', user={x:0.5,y:0.45,seen:-1e9}, nextBlink=2000, blinkStart=-1, blinkDur=170, nextSacc=0, sacc={x:0,y:0}, stateSince=0, lookAway={x:0,y:0,until:0,next:4000};
+let X=null, LID=null, swayPx=0, hairLag=0, hairFlutter=0;
+function spring(s,target,w,zeta,dt){ const n=Math.max(1,Math.ceil(dt/0.008)), h=dt/n; for(let i=0;i<n;i++){ const a=w*w*(target-s.x)-2*zeta*w*s.v; s.v+=a*h; s.x+=s.v*h; } }
 function deform(){
   const w=F.w, pts=P, R=F.right, D=F.down;
-  const open=A.open, jaw=open*F.mw*0.34, lift=open*2.6+A.smile*0.6, wide=(A.wide-0.4)*F.mw*0.1, smile=A.smile, brow=A.brow*F.faceH*0.028, browIn=A.browIn*F.faceH*0.02, blink=A.blink;
-  const cy=Math.cos(A.yaw), sy=Math.sin(A.yaw), cp=Math.cos(A.pitch), sp=Math.sin(A.pitch), cr=Math.cos(A.roll), sr=Math.sin(A.roll);
-  const pv=F.pivot;
-  const X=new Float32Array(N*2), lid=new Float32Array(N*2);
+  const open=A.open, jaw=open*F.mw*0.28, lift=open*2.4+A.smile*0.6, wide=(A.wide-0.4)*F.mw*0.1, smile=A.smile, brow=A.brow*F.faceH*0.028, browIn=A.browIn*F.faceH*0.02, blink=A.blink;
+  const roll=(A.roll+STRAIGHTEN)*F.rollSign;
+  const cy=Math.cos(A.yaw), sy=Math.sin(A.yaw), cp=Math.cos(A.pitch), sp=Math.sin(A.pitch), cr=Math.cos(roll), sr=Math.sin(roll);
+  const pv=F.pivot, lid=LID; lid.fill(0);
   const squint=smile*0.08;   // cheeks push the lower lid up when she smiles
   for(const [u,l,c] of F.lids){ const dx=pts[l][0]-pts[u][0], dy=pts[l][1]-pts[u][1];
     const up=blink*(0.9-squint), lo=blink*0.1+squint;   // up+lo <= 1: the lids meet, never cross (crossed triangles render inside-out)
     lid[u*2]+=dx*up; lid[u*2+1]+=dy*up; lid[c*2]+=dx*up*0.62; lid[c*2+1]+=dy*up*0.62;
     lid[l*2]-=dx*lo; lid[l*2+1]-=dy*lo; }
+  const yawShift=A.yaw*F.faceH*0.04, pitchShift=A.pitch*F.faceH*0.05;
   for(let i=0;i<N;i++){
     let x=pts[i][0]+lid[i*2], y=pts[i][1]+lid[i*2+1], z=w.z[i];
     let du=0, dv=0;
@@ -160,45 +245,66 @@ function deform(){
     if(wh>0){
       const lx=(x-pv[0])*R[0]+(y-pv[1])*R[1], ly=(x-pv[0])*D[0]+(y-pv[1])*D[1], lz=z*0.22;
       let x1=lx*cy+lz*sy, z1=-lx*sy+lz*cy, y1=ly;
-      let y2=y1*cp-z1*sp, z2=y1*sp+z1*cp, x2=x1;
+      let y2=y1*cp-z1*sp, x2=x1;
       let x3=x2*cr-y2*sr, y3=x2*sr+y2*cr;
-      y3+=A.pitch*F.faceH*0.05; x3+=A.yaw*F.faceH*0.04;   // a real neck translates the head a little as it turns
+      y3+=pitchShift; x3+=yawShift;   // a real neck translates the head a little as it turns
       const nx=pv[0]+R[0]*x3+D[0]*y3, ny=pv[1]+R[1]*x3+D[1]*y3;
       x=lerp(x,nx,wh); y=lerp(y,ny,wh);
     }
+    x+=swayPx*w.body[i]+(hairLag+hairFlutter)*w.hair[i];
     X[i*2]=x; X[i*2+1]=y;
   }
   return X;
 }
 let dpr=1;
-function resize(){ dpr=Math.min(2,devicePixelRatio||1); const r=stage.getBoundingClientRect(); for(const c of [glc,cavc]){ c.width=Math.round(r.width*dpr); c.height=Math.round(r.height*dpr);} }
-addEventListener('resize',resize); new ResizeObserver(resize).observe(stage); resize();
-function globalMatrix(){ const cx=MESH.w/2, cy=MESH.h*0.95, s=1.0+A.breath*0.003+0.02, a=A.sway, ca=Math.cos(a), sa=Math.sin(a);
-  return {a:ca*s,b:sa*s,c:-sa*s,d:ca*s,e:cx-(ca*s*cx-sa*s*(cy-A.bob)),f:cy-(sa*s*cx+ca*s*(cy-A.bob))}; }
-const mouthc=document.createElement('canvas'), mc=mouthc.getContext('2d');
+function fit(){   // avatar fills the left third: as big as fits above the controls, keeping the portrait's aspect
+  if(!VIEW) return; const left=$('#left'), ctl=$('#controls');
+  const availW=left.clientWidth, availH=left.clientHeight-ctl.offsetHeight-10, ar=VIEW.w/VIEW.h;
+  let w=Math.min(availW,availH*ar), h=w/ar; w=Math.floor(w); h=Math.floor(h);
+  stage.style.width=w+'px'; stage.style.height=h+'px';
+  const sc=w/VIEW.w; stage.style.background=`#0c0a0a url(avatar.png) ${-VIEW.x*sc}px ${-VIEW.y*sc}px / ${MESH.w*sc}px ${MESH.h*sc}px no-repeat`;
+  dpr=Math.min(2,devicePixelRatio||1); const cw=Math.round(w*dpr), ch=Math.round(h*dpr);
+  if(outc.width===cw&&outc.height===ch) return;   // resizing clears a canvas: only when the size really changed
+  for(const c of [glc,cavc,outc]){ c.width=cw; c.height=ch; }
+  if(X){ try{ render(performance.now()); }catch{} }   // repaint at once, no empty frame
+}
+addEventListener('resize',fit); new ResizeObserver(fit).observe($('#left'));
+function globalMatrix(){   // breathing (tiny scale from the hips) + the part of the sway that moves the whole figure
+  const cx=MESH.w/2, cy=MESH.h*0.98, s=1.0+A.breath*0.0025, tx=SW.x*F.swayPx*GLOBAL_SWAY;
+  return {a:s,b:0,c:0,d:s,e:cx-s*cx+tx,f:cy-s*(cy-A.bob)};
+}
+// ───────── mouth cavity (2D canvas behind the GL layer, visible through the mouth hole) ─────────
+const mouthc=document.createElement('canvas'), mc=mouthc.getContext('2d',{willReadFrequently:true});
+function viewT(G,c){ const sx=c.width/VIEW.w, sy=c.height/VIEW.h; return [sx*G.a,sy*G.b,sx*G.c,sy*G.d,sx*(G.e-VIEW.x),sy*(G.f-VIEW.y)]; }
+function affine3(s,d){   // 2D affine taking source points s[0..2] onto d[0..2]
+  const [a,b,c]=s, det=(b[0]-a[0])*(c[1]-a[1])-(c[0]-a[0])*(b[1]-a[1]); if(Math.abs(det)<1e-6) return [1,0,0,1,0,0];
+  const i00=(c[1]-a[1])/det, i01=-(c[0]-a[0])/det, i10=-(b[1]-a[1])/det, i11=(b[0]-a[0])/det;
+  const ux=[d[1][0]-d[0][0],d[2][0]-d[0][0]], uy=[d[1][1]-d[0][1],d[2][1]-d[0][1]];
+  const m00=ux[0]*i00+ux[1]*i10, m01=ux[0]*i01+ux[1]*i11, m10=uy[0]*i00+uy[1]*i10, m11=uy[0]*i01+uy[1]*i11;
+  return [m00,m10,m01,m11,d[0][0]-m00*a[0]-m01*a[1],d[0][1]-m10*a[0]-m11*a[1]];
+}
 function drawCavity(X,G){
   cav.setTransform(1,0,0,1,0,0); cav.clearRect(0,0,cavc.width,cavc.height);
-  const sx=cavc.width/MESH.w, sy=cavc.height/MESH.h, T=[sx*G.a,sy*G.b,sx*G.c,sy*G.d,sx*G.e,sy*G.f];   // same affine as the GL layer
-  const U=MESH.inner_u, Lw=MESH.inner_l, pt=i=>[X[i*2],X[i*2+1]], D=F.down, R=F.right, mw=F.mw;
+  const T=viewT(G,cavc);
+  const U=MESH.inner_u, Lw=MESH.inner_l, pt=i=>[X[i*2],X[i*2+1]], mw=F.mw;
   const top=pt(13), bot=pt(14), gap=Math.hypot(bot[0]-top[0],bot[1]-top[1]), mid=[(top[0]+bot[0])/2,(top[1]+bot[1])/2];
-  // underlay: the untouched portrait around the mouth, moved with the lips, so a closed mouth looks exactly like the picture
-  const o=P[13], dx=top[0]-o[0], dy=top[1]-o[1], r=mw*1.8;
-  cav.setTransform(...T); cav.drawImage(IMG,o[0]-r,o[1]-r,2*r,2*r,o[0]-r+dx,o[1]-r+dy,2*r,2*r);
+  const dv=[X[2*2]-X[168*2],X[2*2+1]-X[168*2+1]], dl=Math.hypot(dv[0],dv[1])||1, D=[dv[0]/dl,dv[1]/dl], R=[-D[1],D[0]];   // the deformed face's own down axis
+  // underlay: the untouched portrait around the mouth, carried along with the head (affine from the lip corners + nose base), so a closed mouth is exactly the picture
+  const o=P[13], r=mw*1.8;
+  cav.setTransform(...T); cav.transform(...affine3([P[61],P[291],P[2]],[pt(61),pt(291),pt(2)]));
+  cav.drawImage(IMG,o[0]-r,o[1]-r,2*r,2*r,o[0]-r,o[1]-r,2*r,2*r);
   const a=sstep(0.02,0.12,A.open); if(a<=0) return;
-  // cavity layer drawn offscreen with anti-aliased fills; everything after the mouth shape is painted source-atop it
   if(mouthc.width!==cavc.width||mouthc.height!==cavc.height){ mouthc.width=cavc.width; mouthc.height=cavc.height; }
   mc.setTransform(1,0,0,1,0,0); mc.clearRect(0,0,mouthc.width,mouthc.height); mc.setTransform(...T);
   const mouth=()=>{ mc.beginPath(); U.forEach((i,k)=>k?mc.lineTo(...pt(i)):mc.moveTo(...pt(i))); for(let k=Lw.length-1;k>=0;k--) mc.lineTo(...pt(Lw[k])); mc.closePath(); };
   const g=mc.createRadialGradient(mid[0],mid[1]+gap*0.2,1,mid[0],mid[1],mw*1.05); g.addColorStop(0,'#4a1d21'); g.addColorStop(0.5,'#2e1014'); g.addColorStop(1,'#1e090b');
   mouth(); mc.fillStyle=g; mc.fill();
   mc.globalCompositeOperation='source-atop';
-  // tongue: low and soft
   if(gap>5){ const c=[bot[0]-D[0]*gap*0.1,bot[1]-D[1]*gap*0.1], t=mc.createRadialGradient(c[0],c[1]-gap*0.1,1,c[0],c[1],mw*0.55);
     t.addColorStop(0,'rgba(128,58,62,0.5)'); t.addColorStop(1,'rgba(70,24,28,0)'); mc.fillStyle=t;
     mc.beginPath(); mc.ellipse(c[0],c[1],mw*0.5,Math.max(2,gap*0.32),Math.atan2(R[1],R[0]),0,7); mc.fill(); }
-  // upper teeth: one soft row under the upper lip, only across the front (canines fade into shadow), never brighter than the skin
   const row=(idx,dir,h,alpha,c0,c1)=>{ const n=idx.length; mc.beginPath();
-    const off=k=>{ const x=k/(n-1)*2-1, w=Math.max(0,1-Math.pow(Math.abs(x)/0.78,2.2)); return w; };
+    const off=k=>{ const x=k/(n-1)*2-1; return Math.max(0,1-Math.pow(Math.abs(x)/0.78,2.2)); };
     idx.forEach((i,k)=>{const p=pt(i); k?mc.lineTo(p[0]-D[0]*dir*2,p[1]-D[1]*dir*2):mc.moveTo(p[0]-D[0]*dir*2,p[1]-D[1]*dir*2);});
     for(let k=n-1;k>=0;k--){ const p=pt(idx[k]), w=off(k); mc.lineTo(p[0]+D[0]*dir*h*w,p[1]+D[1]*dir*h*w); }
     mc.closePath(); const s0=pt(13), s1=[s0[0]+D[0]*dir*h,s0[1]+D[1]*dir*h], gr=mc.createLinearGradient(s0[0],s0[1],s1[0],s1[1]);
@@ -208,7 +314,6 @@ function drawCavity(X,G){
   if(th>0.8) row(U,1,th,clamp((gap-2)/8,0,0.85),'rgb(118,104,98)','rgb(196,186,176)');
   if(gap>mw*0.32) row(Lw,-1,Math.min(gap*0.16,mw*0.06),0.3,'rgb(104,92,86)','rgb(150,140,132)');
   mc.filter='none';
-  // shadow under the upper lip + dark corners keep the teeth inside the mouth
   const sh=mc.createLinearGradient(top[0],top[1],top[0]+D[0]*(th+2)*1.3,top[1]+D[1]*(th+2)*1.3); sh.addColorStop(0,'rgba(36,10,12,0.6)'); sh.addColorStop(1,'rgba(36,10,12,0)');
   mc.fillStyle=sh; mc.fillRect(mid[0]-mw*2,mid[1]-mw*2,mw*4,mw*4);
   const cl=pt(78), cr=pt(308), vg=mc.createLinearGradient(cl[0],cl[1],cr[0],cr[1]);
@@ -217,104 +322,154 @@ function drawCavity(X,G){
   mc.globalCompositeOperation='source-over';
   cav.setTransform(1,0,0,1,0,0); cav.globalAlpha=a; cav.drawImage(mouthc,0,0); cav.globalAlpha=1;
 }
-let last=0;
+// ───────── one render loop: behaviour -> smoothed pose -> mesh -> GL + cavity; camera preview drawn in the same frame ─────────
+let last=0, veilOp=-1;
 function frame(t){
   requestAnimationFrame(frame);
-  if(!MESH||!IMG.complete||!IMG.naturalWidth) return;
-  const dt=Math.min(50,t-last)/1000; last=t; const k=r=>1-Math.exp(-r*dt); const ts=t/1000;
-  // ── lips from the audio clock: fast attack, slower release; env = slow energy envelope for head/brow emphasis
+  drawCam(t);
+  if(!MESH||!VIEW) return;
+  try{ render(t); }catch(e){ if(!frameErr){ frameErr=String(e&&e.stack||e); console.error(e); clientLog('frame_error',{error:frameErr}); } }
+}
+let frameErr=null;
+function render(t){
+  if(glLostAt&&performance.now()-glLostAt>1500&&glRebuilds<6) rebuildGL();   // give up after a few tries: the 2D portrait keeps going
+  const glOK=texReady&&gl&&!gl.isContextLost()&&performance.now()>gl2dUntil;
+  const dt=clamp((t-last)/1000,0.001,0.05); last=t; const k=r=>1-Math.exp(-r*dt); const ts=t/1000;
+  // lips from the audio output clock (what the speakers play right now), smooth attack and release: no chatter
   const f=currentViseme();
-  A.open+=(f.open-A.open)*k(f.open>A.open?55:28); A.wide+=(f.wide-A.wide)*k(10); A.env+=(A.open-A.env)*k(3.5);
-  // ── blink: 150-220 ms, 2-7 s apart, sometimes double; eyes closed while asleep
-  if(state==='asleep'){ A.blink+=(0.92-A.blink)*k(3); blinkStart=-1; nextBlink=t+600; }
-  else{
+  A.open+=(f.open-A.open)*k(f.open>A.open?32:18); A.wide+=(f.wide-A.wide)*k(8); A.env+=(A.open-A.env)*k(3);
+  {
     if(blinkStart<0&&t>nextBlink){ blinkStart=t; blinkDur=150+Math.random()*70; }
     if(blinkStart>=0){ const p=(t-blinkStart)/blinkDur; const b=p<0.35?p/0.35:Math.max(0,1-(p-0.35)/0.65); A.blink+=(b-A.blink)*k(60);
-      if(p>=1){ blinkStart=-1; nextBlink=t+(Math.random()<0.12?250:2000+Math.random()*5000); } }
+      if(p>=1){ blinkStart=-1; nextBlink=t+(Math.random()<0.12?250:2500+Math.random()*4500); } }
     else A.blink+=(0-A.blink)*k(40);
   }
-  // ── where is the user, where does she look
   const userVisible=t-user.seen<1500;
-  if(t>nextSacc){ sacc={x:(Math.random()-0.5)*(userVisible?2.2:4),y:(Math.random()-0.5)*(userVisible?1.2:2)}; nextSacc=t+600+Math.random()*2400; }
-  if(t>lookAway.next){ lookAway={x:(Math.random()-0.5)*0.35,y:(Math.random()-0.5)*0.12-0.04,until:t+700+Math.random()*1200,next:t+5000+Math.random()*9000}; }
-  const away=t<lookAway.until&&state!=='speaking'&&state!=='thinking';
-  const lookYaw=userVisible?clamp(-(user.x-0.5)*0.5,-0.22,0.22):0, lookPitch=userVisible?clamp((user.y-0.45)*0.25,-0.1,0.12):0;
-  let ty=lookYaw*0.6, tp=lookPitch*0.6, tr=0, tsm=0.1, tb=0, tbi=0, gx=sacc.x, gy=sacc.y;
-  ty+=noise(ts*0.35,1)*0.035; tp+=noise(ts*0.3,2)*0.02; tr+=noise(ts*0.25,3)*0.02;   // never perfectly still
-  if(away){ ty+=lookAway.x; tp+=lookAway.y; gx+=lookAway.x*14; gy+=lookAway.y*20; }
+  if(t>nextSacc){ sacc={x:(Math.random()-0.5)*(userVisible?1.6:3),y:(Math.random()-0.5)*(userVisible?0.8:1.4)}; nextSacc=t+900+Math.random()*2600; }
+  if(t>lookAway.next){ lookAway={x:(Math.random()-0.5)*0.16,y:(Math.random()-0.5)*0.05-0.02,until:t+800+Math.random()*1200,next:t+7000+Math.random()*9000}; }
+  const away=t<lookAway.until&&state!=='speaking'&&state!=='thinking'&&!userTalking;
+  const ux=userVisible?user.x-0.5:0, lookYaw=clamp(-ux*0.3,-0.08,0.08), lookPitch=userVisible?clamp((user.y-0.45)*0.12,-0.04,0.05):0;
+  let ty=lookYaw, tp=lookPitch, tr=0, tsm=0.1, tb=0, tbi=0, gx=sacc.x, gy=sacc.y;
+  ty+=noise(ts*0.3,1)*0.02; tp+=noise(ts*0.27,2)*0.012; tr+=noise(ts*0.21,3)*0.012;   // never perfectly still
+  if(away){ ty+=lookAway.x; tp+=lookAway.y; gx+=lookAway.x*10; gy+=lookAway.y*12; }
   const since=(t-stateSince)/1000;
-  if(state==='asleep'){ ty=noise(ts*0.2,1)*0.02; tp=0.05+noise(ts*0.2,2)*0.01; tsm=0.04; }
-  else if(state==='idle'){ tsm=0.1; }
-  else if(state==='listening'){ tr+=0.03; tsm=0.18; tb=0.1;
-    if(userTalking){ A.nod+=(1-A.nod)*k(3); } else A.nod+=(0-A.nod)*k(2);
-    tp+=A.nod*Math.sin(ts*2*Math.PI*1.4)*0.022; tb+=A.nod*0.12; tsm+=A.nod*0.08; }
-  else if(state==='thinking'){ const w=sstep(0,0.6,since)*(1-sstep(1.6,2.4,since)); ty+=0.14*w; tp-=0.08*w; tr-=0.07*w; gx+=5*w; gy-=3.5*w; tsm=0.06; tbi=0.5*w; tb=-0.05*w; }
-  else if(state==='speaking'){ const e=A.env; tsm=0.12; tb=0.05+e*0.18; tp+=e*0.03+noise(ts*1.1,4)*0.015*e; ty+=noise(ts*0.9,5)*0.03*(0.4+e); tr+=noise(ts*0.7,6)*0.02;
-    if(nowSaying().endsWith('?')&&sayingProgress()>0.6){ tb+=0.3; tr+=0.04; } }
-  gx+=-A.yaw*22; gy+=-A.pitch*18;   // eyes stay on the user when the head turns
-  A.yaw+=(clamp(ty,-0.13,0.13)-A.yaw)*k(3.2); A.pitch+=(clamp(tp,-0.08,0.09)-A.pitch)*k(3.5); A.roll+=(clamp(tr,-0.07,0.07)-A.roll)*k(2.5);
-  A.smile+=(tsm-A.smile)*k(2); A.brow+=(tb-A.brow)*k(6); A.browIn+=(tbi-A.browIn)*k(4);
-  A.gazeX+=(clamp(gx,-7,7)-A.gazeX)*k(14); A.gazeY+=(clamp(gy,-4,4)-A.gazeY)*k(14);
-  A.breath=Math.sin(ts*2*Math.PI/4.2); A.bob=A.breath*1.8+A.env*1.5; A.sway=noise(ts*0.15,7)*0.004;
-  $('#veil').style.opacity=state==='asleep'?0.94:0;
-  if(window.__hold) Object.assign(A,window.__hold);   // test hook: freeze a pose for screenshots
-  // ── geometry
+  if(state==='asleep'){ ty=noise(ts*0.2,1)*0.015; tp=0.03; tsm=0.04; }
+  else if(state==='listening'){ tsm=0.16; tb=0.08;
+    A.nod+=((userTalking?1:0)-A.nod)*k(userTalking?2.5:1.5);
+    tp+=A.nod*Math.sin(ts*2*Math.PI*1.1)*0.014; tb+=A.nod*0.1; tsm+=A.nod*0.06; }
+  else if(state==='thinking'){ const w=sstep(0,0.7,since)*(1-sstep(1.8,2.6,since)); ty+=0.06*w; tp-=0.04*w; gx+=3*w; gy-=2*w; tsm=0.06; tbi=0.4*w; tb=-0.04*w; }
+  else if(state==='speaking'){ const e=A.env; tsm=0.12; tb=0.04+e*0.14; tp+=e*0.018+noise(ts*0.9,4)*0.01*e; ty+=noise(ts*0.7,5)*0.02*(0.4+e); }
+  gx+=-A.yaw*20; gy+=-A.pitch*16;   // eyes stay on the user when the head turns
+  A.yaw+=(clamp(ty,-0.09,0.09)-A.yaw)*k(2.4); A.pitch+=(clamp(tp,-0.05,0.06)-A.pitch)*k(2.6); A.roll+=(clamp(tr,-0.03,0.03)-A.roll)*k(1.8);
+  A.smile+=(tsm-A.smile)*k(1.6); A.brow+=(tb-A.brow)*k(4); A.browIn+=(tbi-A.browIn)*k(3);
+  A.gazeX+=(clamp(gx,-3.5,3.5)-A.gazeX)*k(12); A.gazeY+=(clamp(gy,-2,2)-A.gazeY)*k(12);
+  A.breath=Math.sin(ts*2*Math.PI/4.6); A.bob=A.breath*1.4+A.env*1.0;
+  // body sway: slow incommensurate waves (~10 cm total), a slight lean toward the visitor, critically damped so it never jerks
+  const swayT=state==='asleep'?0.25*noise(ts*0.1,9):clamp(0.62*Math.sin(ts*2*Math.PI/11+0.6)+0.28*Math.sin(ts*2*Math.PI/18+2.1)+0.14*Math.sin(ts*2*Math.PI/29+4.0)-ux*0.25,-1,1);
+  spring(SW,swayT,1.1,1.0,dt);
+  if(window.__hold) Object.assign(A,window.__hold);   // test hook: freeze a pose for screenshots ({open,yaw,pitch,roll,blink,sway})
+  const swayN=window.__hold&&window.__hold.sway!=null?window.__hold.sway:SW.x;
+  swayPx=swayN*F.swayPx*(1-GLOBAL_SWAY);
+  // hair: follows where the head is with a soft underdamped lag, plus a faint drift
+  const headX=swayN*F.swayPx+A.yaw*F.faceW*0.6;
+  spring(HAIR,headX,6,0.45,dt); hairLag=clamp(HAIR.x-headX,-F.faceW*0.09,F.faceW*0.09); hairFlutter=noise(ts*0.8,11)*1.2;
   const X=deform(); const G=globalMatrix();
-  const Tz=MESH.T, W=MESH.w, H=MESH.h; const gxo=A.gazeX/W, gyo=A.gazeY/H;
+  if(!glOK){   // no WebGL right now: the plain (swaying, breathing) portrait, never a black stage
+    cav.setTransform(1,0,0,1,0,0); cav.clearRect(0,0,cavc.width,cavc.height); cav.setTransform(...viewT(G,cavc)); if(IMG.complete&&IMG.naturalWidth) cav.drawImage(IMG,0,0); present(false); return; }
+  if(window.__hold&&window.__hold.sway!=null) G.e+=(window.__hold.sway-SW.x)*F.swayPx*GLOBAL_SWAY;
+  const Tz=MESH.T, W=MESH.w, H=MESH.h, gxo=A.gazeX/W, gyo=A.gazeY/H;
   for(let n=0;n<NTRI;n++){ const tr3=Tz[n], fl=tr3[3], eye=fl===1||fl===2;
     for(let v=0;v<3;v++){ const i=tr3[v], o=n*6+v*2; verts[o]=X[i*2]; verts[o+1]=X[i*2+1]; uvs[o]=P[i][0]/W+(eye?gxo:0); uvs[o+1]=P[i][1]/H+(eye?gyo:0); } }
   gl.viewport(0,0,glc.width,glc.height); gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-  const sx=2/W, sy=-2/H;
-  gl.uniformMatrix3fv(uM,false,[sx*G.a, sy*G.b, 0,  sx*G.c, sy*G.d, 0,  sx*G.e-1, sy*G.f+1, 1]);
+  const VX=VIEW.x, VY=VIEW.y, ax=2/VIEW.w, ay=-2/VIEW.h;
+  gl.uniformMatrix3fv(uM,false,[ax*G.a, ay*G.b, 0,  ax*G.c, ay*G.d, 0,  ax*(G.e-VX)-1, ay*(G.f-VY)+1, 1]);
   gl.bindBuffer(gl.ARRAY_BUFFER,bufPos); gl.bufferData(gl.ARRAY_BUFFER,verts,gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER,bufUV); gl.bufferData(gl.ARRAY_BUFFER,uvs,gl.DYNAMIC_DRAW);
   gl.drawArrays(gl.TRIANGLES,0,NTRI*3);
   drawCavity(X,G);
+  if(++presents%5===0&&glBlank()){   // the GPU handed back an empty or black face: show the 2D portrait instead, and stay on 2D a while
+    blanks++; gl2dUntil=performance.now()+(blanks>3?60000:4000);
+    clientLog('blank_frame',{blanks,glLost:!!gl&&gl.isContextLost(),texReady,vis:document.visibilityState,size:[glc.width,glc.height]});
+    cav.setTransform(1,0,0,1,0,0); cav.clearRect(0,0,cavc.width,cavc.height); cav.setTransform(...viewT(G,cavc)); if(IMG.complete&&IMG.naturalWidth) cav.drawImage(IMG,0,0);
+    present(false); return;
+  }
+  present(true);
 }
+function present(withGL){   // one atomic copy to the on-screen canvas: the mouth layer underneath, the face on top
+  outg.setTransform(1,0,0,1,0,0); outg.clearRect(0,0,outc.width,outc.height); outg.drawImage(cavc,0,0); if(withGL) outg.drawImage(glc,0,0);
+}
+let presents=0, blanks=0, gl2dUntil=0;
+const PROBES=[[0.48,0.27],[0.5,0.62],[0.36,0.66]];   // face, chest, sleeve: never dark in the portrait
+const px1=new Uint8Array(4);
+function glBlank(){   // read the WebGL buffer itself (preserveDrawingBuffer), so the on-screen canvas never needs a CPU readback
+  let dark=0; for(const [px,py] of PROBES){ gl.readPixels(Math.round(px*glc.width),Math.round((1-py)*glc.height),1,1,gl.RGBA,gl.UNSIGNED_BYTE,px1);
+    if(px1[3]<20||px1[0]+px1[1]+px1[2]<45) dark++; } return dark===PROBES.length; }
 requestAnimationFrame(frame);
+// back from a pause (VS Code overlay closed, tab shown again): paint right away instead of waiting for the next animation frame
+document.addEventListener('visibilitychange',()=>{ clientLog('page_'+document.visibilityState);
+  if(!document.hidden&&MESH&&VIEW){ last=performance.now(); try{ render(last); }catch{} } });
+// a hidden page gets no animation frames; if it is still on screen (VS Code reports its browser view hidden in some layouts) she keeps moving
+// only the tab running the mirror: idle background tabs would otherwise keep the GPU busy for nothing
+workerTimer(()=>{ if(document.hidden&&runOn&&MESH&&VIEW){ try{ render(performance.now()); }catch{} } },66);
 
 // ═══════════════════════════ UI helpers ═══════════════════════════
-const ring=$('#ring');
-const LABEL={asleep:'mirror',idle:'awake',listening:'listening…',thinking:'thinking…',speaking:'speaking',user:'hearing you'};
-function setState(s){ if(s!==state){ stateSince=performance.now(); if(state==='listening'&&s==='thinking'&&blinkStart<0) nextBlink=0; } state=s; ring.className=s==='listening'&&userTalking?'listening user':s; $('#status').textContent=LABEL[s]||s; }
+const ring=stage;
+const LABEL={asleep:'waiting for you',idle:'awake',listening:'listening…',thinking:'thinking…',speaking:'speaking',user:'hearing you'};
+function setState(s){ if(s!==state){ stateSince=performance.now(); if(state==='listening'&&s==='thinking'&&blinkStart<0) nextBlink=0; state=s; }
+  const hearing=userTalking&&s!=='asleep';   // whoever talks, she shows she hears it (the avatar itself never changes for this)
+  const cls=hearing?s+' user':s; if(ring.className!==cls) ring.className=cls;
+  const lbl=hearing?'hearing you':LABEL[s]||s; if($('#status').textContent!==lbl) $('#status').textContent=lbl; }
 function addChat(cls,text){const p=document.createElement('p');p.className=cls;p.textContent=text;$('#chat').append(p);$('#chat').scrollTop=1e9;return p;}
 const fmtT=ts=>new Date(ts*1000).toTimeString().slice(0,8)+'.'+String(Math.round((ts%1)*1000)).padStart(3,'0');
 function logEvent(ev){ const {id,ts,type,...rest}=ev; const d=document.createElement('div'); d.className=type;
-  d.innerHTML=`<span class=t>${fmtT(ts)}</span> ${esc(type.padEnd(22))} ${esc(JSON.stringify(rest))}`; $('#events').append(d); $('#events').scrollTop=1e9; while($('#events').children.length>400) $('#events').firstChild.remove(); }
+  d.innerHTML=`<span class=t>${fmtT(ts)}</span> ${esc(type.padEnd(22))} ${esc(JSON.stringify(rest))}`; const box=$('#events'), stick=box.scrollTop+box.clientHeight>=box.scrollHeight-30;
+  box.append(d); if(stick) box.scrollTop=1e9; while(box.children.length>400) box.firstChild.remove(); }
 const M={}; function metric(k,v){M[k]=v;$('#metrics').innerHTML=Object.entries(M).map(([k,v])=>`${esc(k)} <b>${esc(v)}</b>`).join(' · ');}
 const es=new EventSource('/events');
 es.addEventListener('snapshot',e=>{JSON.parse(e.data).recent.forEach(logEvent);});
+let usersT=null;
 es.onmessage=e=>{const ev=JSON.parse(e.data); logEvent(ev);
   if(ev.type==='action.mock') console.log('%c[mock action]','color:#ffd36f;font-weight:bold',ev.tool,{device:ev.device,action:ev.action,value:ev.value,identity:ev.identity});
-  else console.log('[event]',ev.type,ev);
-  if(/^user|^users/.test(ev.type)) refreshUsers(); };
+  if(/^(user|guest|visit|session|users)\./.test(ev.type)){ clearTimeout(usersT); usersT=setTimeout(refreshUsers,120); } };
 
-// ═══════════════════════════ speech out: WebAudio + lip track ═══════════════════════════
-let ac=null, master=null, items=[], nextStart=0, lastSpeechEnd=0, lastSpokenText='';
-function audio(){ if(!ac){ac=new AudioContext({sampleRate:24000}); master=ac.createGain(); master.connect(ac.destination);} if(ac.state==='suspended') ac.resume(); return ac; }
+// ═══════════════════════════ speech out: WebAudio + lip track on the audio output clock ═══════════════════════════
+let ac=null, master=null, items=[], nextStart=0, lastSpeechEnd=0;
+const SAID=[];   // what she said recently (for the echo filter): {t, words}
+function audio(){ if(!ac){ac=new AudioContext({sampleRate:24000,latencyHint:'interactive'}); master=ac.createGain(); master.connect(ac.destination);} if(ac.state==='suspended') ac.resume(); return ac; }
+function acNow(){   // the context time that is leaving the speakers right now
+  if(!ac) return 0;
+  if(ac.getOutputTimestamp){ const o=ac.getOutputTimestamp(); if(o.contextTime>0&&o.performanceTime>0) return o.contextTime+(performance.now()-o.performanceTime)/1000; }
+  return ac.currentTime-(ac.outputLatency||ac.baseLatency||0);
+}
+const words=s=>(s||'').toLowerCase().replace(/[^a-z0-9' ]+/g,' ').split(/\s+/).filter(Boolean);
 function enqueueSpeech(sp){
   const ctx=audio(); const b=atob(sp.pcm16); const n=b.length/2; const i16=new Int16Array(n); const u8=new Uint8Array(i16.buffer);
   for(let i=0;i<b.length;i++) u8[i]=b.charCodeAt(i);
   const buf=ctx.createBuffer(1,n,sp.sr); const ch=buf.getChannelData(0); for(let i=0;i<n;i++) ch[i]=i16[i]/32768;
+  duck(!!VAD.rec||VAD.hot>=DUCK_MS);   // someone is talking: her reply comes in softly, like a person yielding the floor
   const src=ctx.createBufferSource(); src.buffer=buf; src.connect(master);
-  const start=Math.max(ctx.currentTime+0.04,nextStart); src.start(start); nextStart=start+buf.duration+0.12;
+  const start=Math.max(ctx.currentTime+0.06,nextStart); src.start(start); nextStart=start+buf.duration+0.1;   // queued gapless-ish: sentences never overlap or stutter
   const it={src,start,dur:buf.duration,feats:sp.feats,text:sp.text}; items.push(it);
-  src.onended=()=>{ items=items.filter(x=>x!==it); lastSpeechEnd=performance.now(); lastSpokenText=it.text; if(!items.length&&!streaming) setState(awake?'listening':'idle'); };
+  SAID.push({t:performance.now(),words:words(sp.text)}); while(SAID.length>12) SAID.shift();
+  src.onended=()=>{ items=items.filter(x=>x!==it); lastSpeechEnd=performance.now();
+    if(!items.length){ if(greetingTurn&&!streaming) greetingTurn=null; if(!streaming) setState(awake?'listening':'idle'); } };
   setState('speaking');
 }
-function currentItem(){ if(!ac||!items.length) return null; const now=ac.currentTime-(ac.outputLatency||0)+0.03; return items.find(it=>now>=it.start&&now<it.start+it.dur)||null; }
-function currentViseme(){ const it=currentItem(); if(!it) return {open:0,wide:0.3}; const now=ac.currentTime-(ac.outputLatency||0)+0.03; const i=Math.floor((now-it.start)*1000/it.feats.frame_ms); return {open:it.feats.open[i]??0,wide:it.feats.wide[i]??0.3}; }
-function nowSaying(){ if(!ac) return ''; const now=ac.currentTime; const it=items.find(it=>now>=it.start-0.1&&now<it.start+it.dur); return it?it.text:''; }
-function sayingProgress(){ const it=currentItem(); return it?(ac.currentTime-it.start)/it.dur:0; }
-function stopAudio(){ const t=performance.now(); for(const it of items){try{it.src.onended=null;it.src.stop();}catch{}} const had=items.length; items=[]; nextStart=0; if(had) lastSpeechEnd=performance.now(); return had?performance.now()-t:null; }
+function currentItem(now){ return items.find(it=>now>=it.start&&now<it.start+it.dur)||null; }
+function currentViseme(){ if(!ac||!items.length) return {open:0,wide:0.3}; const now=acNow()+0.04, it=currentItem(now); if(!it) return {open:0,wide:0.3};
+  const x=(now-it.start)*1000/it.feats.frame_ms, i=Math.floor(x), fr=x-i, o=it.feats.open, w=it.feats.wide;   // interpolate between 20 ms lip frames
+  return {open:lerp(o[i]??0,o[i+1]??0,fr),wide:lerp(w[i]??0.3,w[i+1]??0.3,fr)}; }
+function nowSaying(){ if(!ac) return ''; const now=acNow(); const it=items.find(it=>now>=it.start-0.1&&now<it.start+it.dur); return it?it.text:''; }
+function stopAudio(){ const t=performance.now(); if(typeof duck==='function') duck(false); for(const it of items){try{it.src.onended=null;it.src.stop();}catch{}} const had=items.length; items=[]; nextStart=0; if(had) lastSpeechEnd=performance.now(); return had?performance.now()-t:null; }
 const speaking=()=>items.length>0;
 
 // ═══════════════════════════ conversation ═══════════════════════════
-let ctrl=null, streaming=false, turn=0, awake=false, lastTurn=null;
-const V={identity:'unknown',confidence:null,others:0,session:null};
+let ctrl=null, streaming=false, turn=0, awake=false, lastTurn=null, greetingTurn=null, runOn=false;
+const V={identity:'unknown',confidence:null,others:0,session:null,visit:null,display:'—'};
+const handledVisits=new Set();
 function interrupt(why){
   const saying=nowSaying(), had=items.length||streaming;
-  const t0=performance.now(); const stopMs=stopAudio(); if(ctrl){ctrl.abort();ctrl=null;} streaming=false; turn++;
+  const t0=performance.now(); stopAudio(); if(ctrl){ctrl.abort();ctrl=null;} streaming=false; turn++; greetingTurn=null;
   let ms=null;
   if(had){ ms=+(performance.now()-t0).toFixed(1); metric('interrupt stop',ms+' ms'); addChat('sys',`⏹ interrupted (${why})`);
     if(lastTurn){ lastTurn.interrupted=true; lastTurn.stop_ms=ms; }
@@ -322,63 +477,100 @@ function interrupt(why){
   setState(awake?'listening':'idle'); return ms;
 }
 async function send(text,opts={}){
-  interrupt('new user turn'); audio();
+  interrupt(opts.greeting?'greeting':'new user turn'); audio();
   if(!opts.greeting) addChat('u',text); const bubble=addChat('a','…');
-  const my=++turn; ctrl=new AbortController(); streaming=true; setState('thinking'); let full='';
-  const summary={text:'',tools:[],interrupted:false,stop_ms:null,done:false}; lastTurn=summary;
+  const my=++turn; ctrl=new AbortController(); streaming=true; if(opts.greeting) greetingTurn=my;
+  setState('thinking'); let full='';
+  const summary={text:'',tools:[],interrupted:false,stop_ms:null,done:false,kind:opts.greeting||null}; lastTurn=summary;
   try{
-    const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,identity:V.identity,confidence:V.confidence,others:V.others,greeting:!!opts.greeting}),signal:ctrl.signal});
+    const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,identity:V.identity,confidence:V.confidence,others:V.others,greeting:opts.greeting||false}),signal:ctrl.signal});
     const rd=r.body.getReader(), dec=new TextDecoder(); let acc='';
     while(true){
       const {value,done}=await rd.read(); if(done)break; if(my!==turn)return summary;
       acc+=dec.decode(value,{stream:true}); const lines=acc.split('\n'); acc=lines.pop();
       for(const l of lines){ if(!l)continue; const j=JSON.parse(l);
-        if(j.type==='token'){ full+=j.text; bubble.textContent=full.replace(/`*\b(home_action|remember_preference)\s*\([^)]*\)?`*\s*/g,''); }
+        if(j.type==='token'){ full+=j.text; bubble.textContent=full.replace(/`*\b(home_action|remember_preference)\s*[({][^)}]*[)}]?`*\s*/g,'').replace(/<\|[^|]*\|>/g,''); }
         else if(j.type==='speech'){ enqueueSpeech(j); if(j.first_audio_s) metric('first audio',j.first_audio_s+' s'); }
         else if(j.type==='tool_call'){ summary.tools.push({name:j.name,args:j.args}); }
         else if(j.type==='tool_result'){ const r=j.result; addChat('sys',r.status==='ok'?`⚙ mock ${j.name}: ${r.device} · ${r.action}${r.value?' · '+r.value:''}`:`⚙ ${j.name} failed: ${r.error}`); }
         else if(j.type==='llm_done'){ metric('llm',`${j.tok_s} tok/s`); }
         else if(j.type==='error'){ addChat('sys','error: '+j.error); }
-        else if(j.type==='done'){ metric('first token',j.first_token_s+' s'); metric('turn total',j.total_s+' s'); summary.text=j.text||full; summary.done=true; if(j.text) bubble.textContent=j.text; else bubble.remove(); }
+        else if(j.type==='done'){ if(j.first_token_s!=null) metric('first token',j.first_token_s+' s'); metric('turn total',j.total_s+' s'); summary.text=j.text||full; summary.done=true; if(j.text) bubble.textContent=j.text; else bubble.remove(); }
       }
     }
   }catch(e){ if(e.name!=='AbortError') addChat('sys','error: '+e); }
-  finally{ if(my===turn){ streaming=false; ctrl=null; if(!items.length) setState(awake?'listening':'idle'); } }
+  finally{ if(my===turn){ streaming=false; ctrl=null; if(!items.length){ if(greetingTurn===my) greetingTurn=null; setState(awake?'listening':'idle'); } } }
   summary.text=summary.text||full; return summary;
 }
-const waitSilence=(maxMs=20000)=>new Promise(res=>{ const t0=performance.now(); const iv=setInterval(()=>{ if((!items.length&&!streaming)||performance.now()-t0>maxMs){clearInterval(iv);res();} },100); });
+const sleepMs=ms=>new Promise(r=>setTimeout(r,ms));
+const waitSilence=(maxMs=30000)=>new Promise(res=>{ const t0=performance.now(); const iv=setInterval(()=>{ if((!items.length&&!streaming)||performance.now()-t0>maxMs){clearInterval(iv);res();} },100); });
 
-// ═══════════════════════════ speech in: always-on mic → VAD with pre-roll → 16 kHz WAV → /transcribe; talking over Aria interrupts her ═══════════════════════════
+// ═══════════════════════════ speech in: mic -> VAD -> 16 kHz WAV -> /transcribe ═══════════════════════════
+// She greets first, then listens: no barge-in while she greets; her own echo and short noises never become a turn.
 let micCtx=null, micStream=null, userTalking=false, transcribing=0, utterSeq=0, lastSentSeq=0;
 const VAD={floor:0.004, echo:0.01, hot:0, cold:0, voiced:0, rec:null, pre:[], preLen:0};
+// Loudness says "something made a sound"; Silero (server, /vad) says "that sound is a human voice". Only a voice may
+// interrupt her, duck her, show "hearing you" or become a turn — claps, doors, dishes, music, a cat never do.
+// If /vad is unreachable it falls back to loudness only.
+const SV={ok:true, retryAt:0, q:[], qLen:0, busy:false, reset:true, speech:0, last:-1e9, rec:0};
+const SPEECH_DUCK_MS=96, SPEECH_BARGE_MS=224, SPEECH_START_MS=96, SPEECH_TURN_MS=160, SPEECH_END_MS=800;
+function svFeed(x,sr){
+  const R=sr/16000, m=Math.floor(x.length/R), pcm=new Int16Array(m);
+  for(let i=0;i<m;i++){ const a=Math.floor(i*R), b=Math.max(a+1,Math.floor((i+1)*R)); let s=0; for(let k=a;k<b;k++) s+=x[k]; pcm[i]=clamp(s/(b-a),-1,1)*32767; }
+  SV.q.push(pcm); SV.qLen+=m; if(SV.qLen>16000){ SV.q=[]; SV.qLen=0; SV.reset=true; }   // backlog = server stalled; drop and resync
+  if(!SV.busy&&SV.qLen>=1536&&(SV.ok||performance.now()>SV.retryAt)) svPost();
+}
+async function svPost(){
+  const body=new Int16Array(SV.qLen); let o=0; for(const c of SV.q){ body.set(c,o); o+=c.length; } SV.q=[]; SV.qLen=0; SV.busy=true;
+  try{
+    const r=await fetch('/vad',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Tab':TAB,'X-Reset':SV.reset?'1':'0'},body:body.buffer});
+    if(!r.ok) throw new Error(r.status); const {p}=await r.json(); SV.reset=false;
+    if(!SV.ok) clientLog('vad_back'); SV.ok=true;
+    const now=performance.now();
+    for(const v of p){ if(v>=0.5){ SV.speech+=32; SV.last=now; if(VAD.rec) SV.rec+=32; } else SV.speech=Math.max(0,SV.speech-(v<0.2?32:16)); }
+    SV.speech=Math.min(SV.speech,3000);
+  }catch(e){ if(SV.ok) clientLog('vad_down',{err:String(e)}); SV.ok=false; SV.retryAt=performance.now()+3000; SV.reset=true; }
+  finally{ SV.busy=false; }
+}
+const HOLDOFF_MS=450, MIN_VOICED_MS=250, BARGE_MS=260, DUCK_MS=90;   // barge-in: she softens after ~90 ms of your voice, stops at ~260 ms
 const TAP=`class Tap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(1024);this.n=0;}
 process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];if(this.n===1024){this.port.postMessage(this.b.slice());this.n=0;}}}return true;}}
 registerProcessor('tap',Tap);`;
-function micStatus(t){ $('#mic').textContent=t; }
-function stopCapture(){ VAD.rec=null; VAD.hot=0; VAD.cold=0; VAD.voiced=0; if(userTalking){userTalking=false; if(state==='listening') setState('listening');} }
+let micTxt='';
+function micStatus(t){ if(t!==micTxt){ micTxt=t; $('#mic').textContent=t; } }
+let ducked=false;
+function duck(on){   // she lowers her voice the moment you start talking, like a person yielding the floor; back up if it was only a noise
+  if(on===ducked||!master) return; ducked=on; const g=master.gain, t=ac.currentTime; g.cancelScheduledValues(t); g.setValueAtTime(g.value,t); g.linearRampToValueAtTime(on?0.22:1,t+(on?0.06:0.25)); }
+function stopCapture(){ VAD.rec=null; SV.rec=0; VAD.hot=0; VAD.cold=0; VAD.voiced=0; if(userTalking){userTalking=false; setState(state);} }
 function onMicChunk(x){
   const sr=micCtx.sampleRate, ms=x.length/sr*1000; let s=0; for(let i=0;i<x.length;i++) s+=x[i]*x[i]; const rms=Math.sqrt(s/x.length);
-  VAD.pre.push(x); VAD.preLen+=x.length; while(VAD.preLen-VAD.pre[0].length>sr*0.4){ VAD.preLen-=VAD.pre[0].length; VAD.pre.shift(); }
-  if(!awake){ stopCapture(); micStatus('mic on · waiting for someone to approach'); return; }
-  const herVoice=speaking();
-  // her own voice leaks into the mic despite echo cancellation: learn that level while she talks and require clearly more to barge in
-  if(herVoice&&!VAD.rec&&VAD.hot===0) VAD.echo=Math.max(0.006,VAD.echo*0.97+rms*0.03);
-  const thr=herVoice?Math.max(0.03,VAD.echo*3,VAD.floor*6):Math.max(0.012,VAD.floor*3.2);
+  VAD.pre.push(x); VAD.preLen+=x.length; while(VAD.preLen-VAD.pre[0].length>sr*0.8){ VAD.preLen-=VAD.pre[0].length; VAD.pre.shift(); }
+  svFeed(x,sr);
+  const herVoice=speaking(), tail=performance.now()-lastSpeechEnd<HOLDOFF_MS, voice=ms=>!SV.ok||(SV.speech>=ms&&performance.now()-SV.last<300);
+  if(herVoice&&!VAD.rec&&VAD.hot===0) VAD.echo=Math.max(0.006,VAD.echo*0.97+rms*0.03);   // learn how loud her own voice leaks into the mic
+  if(!awake||!V.visit){ stopCapture(); if(!herVoice) VAD.floor=Math.min(0.05,VAD.floor*0.97+rms*0.03); micStatus(runOn?'mic on · waiting for someone to step in front':'mic off'); return; }
+  if(greetingTurn){ stopCapture(); micStatus('mic on · she greets first, then listens'); return; }
+  // while she talks the bar is higher (her echo leaks into the mic), but low enough to talk over her naturally
+  const thr=(herVoice||tail)?Math.max(0.022,VAD.echo*2.5,VAD.floor*5):Math.max(0.012,VAD.floor*3.2);
   if(!VAD.rec){
-    if(rms>thr){ VAD.hot+=ms; } else { VAD.hot=Math.max(0,VAD.hot-ms*2); if(!herVoice) VAD.floor=Math.min(0.05,VAD.floor*0.96+rms*0.04); }
-    if(VAD.hot>=(herVoice||streaming?260:120)){
-      if(herVoice||streaming) interrupt('you spoke');
-      VAD.rec=[...VAD.pre]; VAD.voiced=VAD.hot; VAD.cold=0; VAD.hot=0; userTalking=true; setState('listening');
+    if(rms>thr){ VAD.hot=Math.min(VAD.hot+ms,2000); } else { VAD.hot=Math.max(0,VAD.hot-ms*2); if(!herVoice&&!tail) VAD.floor=Math.min(0.05,VAD.floor*0.96+rms*0.04); }
+    if(herVoice) duck(VAD.hot>=DUCK_MS&&voice(SPEECH_DUCK_MS)); else if(!VAD.rec) duck(false);
+    // only her voice is cut by sound alone; a reply still being prepared is replaced only when the new utterance has real words
+    if(VAD.hot>=(herVoice?BARGE_MS:120)&&voice(herVoice?SPEECH_BARGE_MS:SPEECH_START_MS)){
+      if(herVoice){ interrupt('you spoke'); clientLog('barge_in',{rms:+rms.toFixed(4),thr:+thr.toFixed(4),echo:+VAD.echo.toFixed(4),speech_ms:SV.ok?SV.speech:null}); }
+      VAD.rec=[...VAD.pre]; VAD.her=herVoice||tail; VAD.voiced=VAD.hot; VAD.cold=0; VAD.hot=0; SV.rec=SV.speech; userTalking=true; setState(speaking()||streaming?state:'listening');
     }
-    micStatus(`mic on · ${herVoice?'she is speaking — talk to interrupt':state==='thinking'?'thinking — talk to interrupt':'listening'} · level ${(rms*1000|0)}`);
+    micStatus(`mic on · ${herVoice?'she is speaking — talk to interrupt':state==='thinking'?'thinking — talk to interrupt':'listening'}`);
     return;
   }
   VAD.rec.push(x);
   if(rms>Math.max(0.01,VAD.floor*2.5)){ VAD.cold=0; VAD.voiced+=ms; } else VAD.cold+=ms;
+  if(SV.ok) VAD.cold=performance.now()-SV.last>=SPEECH_END_MS?Math.max(VAD.cold,750):0;   // ends when the voice stops, not when the room goes quiet
   const len=VAD.rec.reduce((a,b)=>a+b.length,0)/sr;
   micStatus(`mic on · hearing you · ${len.toFixed(1)} s`);
-  if(VAD.cold>=750||len>=15){ const chunks=VAD.rec, voiced=VAD.voiced; stopCapture();
-    if(voiced>=250) transcribe(encodeWav(chunks,sr)); }
+  if(VAD.cold>=750||len>=15){ const chunks=VAD.rec, voiced=VAD.voiced, her=VAD.her, speechMs=SV.rec; stopCapture();
+    // a one-word reply ("yes", "no") is only ~300 ms: Silero decides; loudness alone only when Silero is unavailable
+    if(SV.ok?speechMs>=SPEECH_TURN_MS:voiced>=MIN_VOICED_MS) transcribe(encodeWav(chunks,sr),her); else { clientLog('utterance_dropped',{len_s:+len.toFixed(2),voiced_ms:Math.round(voiced),speech_ms:SV.ok?speechMs:null}); if(!transcribing) flushHeard(); if(!VAD.rec) duck(false); if(!speaking()&&!streaming) setState('listening'); } }
 }
 function encodeWav(chunks,sr){
   const n=chunks.reduce((a,b)=>a+b.length,0), x=new Float32Array(n); let o=0; for(const c of chunks){x.set(c,o);o+=c.length;}
@@ -389,15 +581,35 @@ function encodeWav(chunks,sr){
   v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true); str(36,'data'); v.setUint32(40,pcm.length*2,true);
   new Int16Array(buf,44).set(pcm); return new Blob([buf],{type:'audio/wav'});
 }
-async function transcribe(blob){
-  const seq=++utterSeq; transcribing++; if(!speaking()&&!streaming) setState('thinking');
+function isEcho(text){   // her own voice picked up by the mic and transcribed: mostly her recent words
+  const w=words(text); if(!w.length) return true;
+  const bag=new Set(SAID.filter(s=>performance.now()-s.t<20000).flatMap(s=>s.words)); const hit=w.filter(x=>bag.has(x)).length/w.length;
+  return w.length>=2?hit>=0.7:hit===1;
+}
+// What was heard is never dropped because someone kept talking (a pause mid-sentence, people in the room): pieces are kept in order
+// and sent as one turn once nobody is talking and nothing is still being transcribed. A piece belongs to the visit it was heard in
+// and goes stale after a few seconds: old words never surface later as a phantom turn.
+let heard=[];
+const HEARD_TTL_MS=8000;
+function flushHeard(){
+  if(VAD.rec||transcribing||!heard.length) return false;
+  const now=performance.now();
+  const parts=heard.filter(h=>h.seq>lastSentSeq&&h.visit===V.visit&&now-h.t<HEARD_TTL_MS).sort((a,b)=>a.seq-b.seq); heard=[];
+  if(!parts.length||!awake||!V.visit) return false;
+  lastSentSeq=parts[parts.length-1].seq; send(parts.map(h=>h.text).join(' ')); return true;
+}
+async function transcribe(blob,duringHer){
+  const seq=++utterSeq, visit=V.visit, t=performance.now(); transcribing++; if(!speaking()&&!streaming) setState('thinking');
   try{
     const r=await fetch('/transcribe',{method:'POST',headers:{'Content-Type':'audio/wav'},body:blob});
     const j=await r.json(); if(!r.ok) throw new Error(j.error||`transcription HTTP ${r.status}`);
     const text=(j.text||'').trim();
-    if(text&&awake&&seq>lastSentSeq&&!VAD.rec){ lastSentSeq=seq; transcribing--; return send(text); }   // a newer utterance already started: let that one speak
+    if(text&&duringHer&&isEcho(text)){ addChat('sys',`(ignored her own echo: "${text}")`); }
+    else if(text&&awake&&V.visit&&V.visit===visit) heard.push({seq,text,visit,t});
   }catch(e){ addChat('sys','speech recognition failed: '+e.message); }
-  transcribing--; if(awake&&!streaming&&!speaking()) setState('listening');
+  transcribing--; if(flushHeard()) return;
+  if(!VAD.rec&&!transcribing) duck(false);
+  if(awake&&!streaming&&!speaking()) setState('listening');
 }
 async function startVAD(){
   if(micStream) return;
@@ -407,76 +619,190 @@ async function startVAD(){
   micCtx.createMediaStreamSource(micStream).connect(node); node.connect(mute).connect(micCtx.destination);
   node.port.onmessage=e=>onMicChunk(e.data); micStatus('mic on');
 }
+function stopVAD(){ if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; micCtx?.close(); micCtx=null; } stopCapture(); micStatus('mic off'); }
 
-// ═══════════════════════════ vision: camera -> /vision/frame -> presence/identity -> greeting ═══════════════════════════
+// ═══════════════════════════ vision: camera -> /vision/frame -> visit (greet once per run, "anything I can do for you?" on return) ═══════════════════════════
 const video=document.createElement('video'); video.muted=true; video.playsInline=true;
-const camc=$('#cam'), camg=camc.getContext('2d'); let camOn=false, visionBusy=false, sleepTimer=null;
+const camc=$('#cam'), camg=camc.getContext('2d'); let camOn=false, visionBusy=false, sleepTimer=null, visionTimer=null, scenarioOn=false;
+let camBoxes=[], camShown=[], camLabel='';
 async function startCam(){
   const s=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}}); video.srcObject=s; await video.play(); camOn=true;
-  $('#camlbl').textContent='camera on · looking for a face'; visionTimer??=setInterval(visionTick,220);
+  try{ camCap=window.ImageCapture?new ImageCapture(s.getVideoTracks()[0]):null; }catch{ camCap=null; }
+  $('#camlbl').textContent='camera on · looking for a face'; visionTimer??=workerTimer(visionTick,90);
 }
-let visionTimer=null;
-const snap=document.createElement('canvas');
-function grab(q=0.6,w=320){ snap.width=w; snap.height=Math.round(w*3/4); snap.getContext('2d').drawImage(video,0,0,snap.width,snap.height); return snap.toDataURL('image/jpeg',q).split(',')[1]; }
+// Timers in a hidden/paused page are throttled to ~1/s (VS Code's integrated browser pauses the page under any overlay), which made
+// recognition lag; a worker's clock is not throttled, so the camera keeps being checked at full rate.
+function workerTimer(fn,ms){
+  try{ const w=new Worker(URL.createObjectURL(new Blob([`setInterval(()=>postMessage(0),${ms})`],{type:'text/javascript'}))); w.onmessage=()=>fn(); return w; }
+  catch{ return setInterval(fn,ms); }
+}
+let camCap=null;
+function stopCam(){ if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; } camOn=false; camCap=null; camBoxes=[]; camShown=[];
+  camg.fillStyle='#000'; camg.fillRect(0,0,camc.width,camc.height); $('#camlbl').textContent='camera off'; }
+function drawCam(t){   // live preview every animation frame (mirrored, like a mirror); boxes glide to the latest detections
+  if(!camOn||video.readyState<2) return;
+  const W=camc.width, H=camc.height;
+  camg.setTransform(-1,0,0,1,W,0); camg.drawImage(video,0,0,W,H); camg.setTransform(1,0,0,1,0,0);
+  while(camShown.length<camBoxes.length) camShown.push([...camBoxes[camShown.length]]); camShown.length=camBoxes.length;
+  camShown.forEach((b,i)=>{ const tb=camBoxes[i]; for(let k=0;k<4;k++) b[k]+=(tb[k]-b[k])*0.35;
+    camg.strokeStyle=i===0?(V.visit?'#7ef0a0':'#6fd3ff'):'#ffffff66'; camg.lineWidth=2; camg.strokeRect((1-b[0]-b[2])*W,b[1]*H,b[2]*W,b[3]*H);
+    if(i===0&&camLabel){ camg.font='600 12px system-ui'; const tw=camg.measureText(camLabel).width+8, x=(1-b[0]-b[2])*W, y=Math.max(0,b[1]*H-17);
+      camg.fillStyle='#000a'; camg.fillRect(x,y,tw,16); camg.fillStyle='#fff'; camg.fillText(camLabel,x+4,y+12); } });
+}
+const snap=document.createElement('canvas'), snapg=snap.getContext('2d',{willReadFrequently:true});
+async function grab(q=0.7,w=480){
+  let src=video, vw=video.videoWidth, vh=video.videoHeight;
+  if((document.hidden||video.readyState<2)&&camCap){ try{ src=await camCap.grabFrame(); vw=src.width; vh=src.height; }catch{} }   // a hidden page may stop painting the <video>; the track still delivers frames
+  snap.width=w; snap.height=Math.round(w*vh/(vw||1))||Math.round(w*3/4); snapg.drawImage(src,0,0,snap.width,snap.height); if(src!==video) src.close?.();
+  return snap.toDataURL('image/jpeg',q).split(',')[1]; }
 async function visionTick(){
-  if(!camOn||visionBusy) return; visionBusy=true;
-  try{ const r=await fetch('/vision/frame',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jpeg:grab(),simulate:$('#who').value||null})}); handleVision(await r.json()); }
+  if(!camOn||visionBusy||scenarioOn||!runOn) return; visionBusy=true;
+  try{ const r=await fetch('/vision/frame',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jpeg:await grab(),simulate:$('#who').value||null,session:mySession})}); handleVision(await r.json()); }
   catch(e){} finally{visionBusy=false;}
 }
+let serverBuild=null;
 function handleVision(v){
-  camg.drawImage(video,0,0,camc.width,camc.height);
-  for(const f of v.faces){ const [x,y,w,h]=f.box; camg.strokeStyle=f===v.faces[0]?'#6fd3ff':'#ffffff66'; camg.lineWidth=2; camg.strokeRect(x*camc.width,y*camc.height,w*camc.width,h*camc.height); }
-  if(v.faces.length){ const [x,y,w,h]=v.faces[0].box; user.x=x+w/2; user.y=y+h/2; user.seen=performance.now(); }
+  if(v.stale&&runOn){ releaseMirror('another tab started'); addChat('sys','mirror stopped here — it was started in another tab'); return null; }
+  if(v.build){ if(serverBuild&&v.build!==serverBuild&&!speaking()&&!streaming){ location.reload(); return; } serverBuild=v.build; }
+  if(v.faces){ camBoxes=v.faces.map(f=>f.box); if(v.faces.length){ const [x,y,w,h]=v.faces[0].box; user.x=1-(x+w/2); user.y=y+h/2; user.seen=performance.now(); } }
+  const prevVisit=V.visit;
+  Object.assign(V,{identity:v.identity,confidence:v.confidence,others:v.others,session:v.session,visit:v.visit,display:v.display});
+  camLabel=v.visit?`${v.display}${v.confidence?' · '+v.confidence:''}`:(v.faces&&v.faces.length?'checking…':'');
   showVision(v);
-  V.identity=v.identity; V.confidence=v.confidence; V.others=v.others; V.session=v.session;
-  if(v.present&&!awake) wake();
-  if(!v.present&&awake&&!sleepTimer) sleepTimer=setTimeout(()=>{ if(!V.session) sleep(); },6000);
-  if(v.present&&sleepTimer){clearTimeout(sleepTimer);sleepTimer=null;}
-  if(v.greet) send('',{greeting:true});
+  if(prevVisit&&prevVisit!==v.visit&&(speaking()||streaming)) interrupt(v.visit?'someone else stepped in':'visitor left');
+  if(v.present||v.visit){ if(sleepTimer){clearTimeout(sleepTimer);sleepTimer=null;} if(!awake) wake(); }
+  else if(awake&&!sleepTimer) sleepTimer=setTimeout(()=>{ sleepTimer=null; if(!V.visit) sleep(); },2500);
+  return onGreet(v.greet);
+}
+function onGreet(g){
+  if(!g||handledVisits.has(g.visit)) return null; handledVisits.add(g.visit);
+  if(g.kind==='return'){
+    if(speaking()||streaming||VAD.rec||transcribing) return null;   // still mid-conversation: do not talk over it
+    return send('',{greeting:'return'});
+  }
+  return send('',{greeting:'greet'});
 }
 function showVision(v){
-  $('#v_p').textContent=v.present?'yes':'no'; $('#v_p').className=v.present?'on':''; $('#v_i').textContent=v.display||v.identity; $('#v_c').textContent=v.confidence??'—'; $('#v_s').textContent=v.session||'—';
-  if(v.faces){ $('#v_f').textContent=v.faces.length; $('#v_ms').textContent=v.ms+' ms'; $('#camlbl').textContent=v.faces.length?`${v.display||v.identity}${v.confidence?' · match '+v.confidence:''}${v.faces.length>1?' · +'+(v.faces.length-1)+' more':''}`:'no face'; }
+  const set=(id,t,c)=>{ const e=$(id); if(e.textContent!==String(t)) e.textContent=t; if(c!==undefined) e.className=c; };
+  set('#v_run',v.session||'— (press Start)'); set('#v_p',v.present?'yes':'no',v.present?'on':''); set('#v_i',v.visit?v.display+(v.registered?' (user)':' (guest)'):'—'); set('#v_c',v.confidence??'—');
+  set('#v_s',v.visit?`${v.visit}${v.greet?' · '+v.greet.kind:''}`:'—');
+  if(v.faces){ set('#v_f',v.faces.length); if(v.ms!=null) set('#v_ms',v.ms+' ms'); set('#camlbl',v.faces.length?`${v.visit?v.display:'checking who this is…'}${v.faces.length>1?' · +'+(v.faces.length-1)+' more':''}`:camOn?'no face':'camera off'); }
 }
-function wake(){ awake=true; setState('listening'); nextBlink=performance.now()+900; }
-function sleep(){ sleepTimer=null; awake=false; stopCapture(); interrupt('visitor left'); setState('asleep'); }
+function wake(){ awake=true; setState(speaking()?'speaking':streaming?'thinking':'listening'); nextBlink=performance.now()+900; }
+function sleep(){ sleepTimer=null; awake=false; stopCapture(); heard=[]; if(speaking()||streaming) interrupt('visitor left'); setState('asleep'); }
+
+// ═══════════════════════════ users / guests panel ═══════════════════════════
 async function refreshUsers(){
-  const j=await (await fetch('/users')).json(); const u=Object.entries(j.users); $('#auto').checked=j.auto_remember;
-  $('#users').innerHTML=u.length?u.map(([id,x])=>`<div class=user><b>${esc(x.display)}</b> <small>${esc(x.samples)} face samples · ${esc(x.how)}</small><small>prefs: ${esc(Object.entries(x.prefs).map(([k,v])=>k+': '+v).join('; ')||'none')}</small><button class=sm data-forget="${esc(id)}">forget</button></div>`).join('')
-    :'<span class=sys>no users registered — approach the camera or press Snapshot</span>';
-  const who=$('#who'); const keep=who.value; who.innerHTML='<option value="">Identity: camera (auto)</option><option value=unknown>Simulate: guest (unknown)</option>'+u.map(([id,x])=>`<option value="${esc(id)}">Simulate: ${esc(x.display)} recognized</option>`).join(''); who.value=[...who.options].some(o=>o.value===keep)?keep:'';
-  $('#users').querySelectorAll('[data-forget]').forEach(b=>b.onclick=()=>fetch('/users/forget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity:b.dataset.forget})}));
+  const j=await (await fetch('/users')).json(); const u=Object.entries(j.users);
+  const greeted=new Set(j.greeted||[]);
+  const tags=id=>`${id===j.current?'<span class=tag>in front now</span>':''}${greeted.has(id)?'<span class=tag style="background:#2a2333;color:#d9c3ff">greeted</span>':''}`;
+  $('#people').innerHTML=u.length?
+    u.map(([id,x])=>`<div class="user${id===j.current?' cur':''}"><b>${esc(x.display)}</b>${tags(id)} <small>${esc(x.samples)} face samples · ${esc(x.how)}</small><small>prefs: ${esc(Object.entries(x.prefs).map(([k,v])=>k+': '+v).join('; ')||'none')}</small><button class=sm data-forget="${esc(id)}">forget</button></div>`)
+    :'<span class=sys>no users registered — Start, look at the camera and press "Snapshot as User"</span>';
+  const who=$('#who'); const keep=who.value;
+  who.innerHTML='<option value="">Camera recognizes (auto)</option><option value=unknown>As: a guest</option>'+u.map(([id,x])=>`<option value="${esc(id)}">As: ${esc(x.display)}</option>`).join('');
+  who.value=[...who.options].some(o=>o.value===keep)?keep:'';
+  $('#people').querySelectorAll('[data-forget]').forEach(b=>b.onclick=()=>fetch('/users/forget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity:b.dataset.forget})}));
+  $('#v_run').textContent=j.session||'— (press Start)';
 }
-async function simulateApproach(identity,force){
-  audio();
-  const r=await fetch('/vision/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity,force_greet:!!force})});
-  const v=await r.json(); V.identity=v.identity; V.confidence=null; V.others=0; V.session=v.session; user.x=0.5;user.y=0.42;user.seen=performance.now()+6e5;
-  showVision({...v,present:true});
-  if(!awake) wake(); if(v.greet) return send('',{greeting:true}); return null;
+
+// ═══════════════════════════ run session: Start .. Stop (everything remembered in memory in between) ═══════════════════════════
+async function startRun(){ const j=await (await fetch('/session/start',{method:'POST'})).json(); runOn=true; mySession=j.session; handledVisits.clear(); heard=[]; V.session=j.session; V.visit=null; $('#v_run').textContent=j.session; return j.session; }
+let mySession=null;
+async function ensureRun(){ if(!runOn) await startRun(); }
+async function simulateApproach(identity){
+  audio(); await ensureRun();
+  const r=await fetch('/vision/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity})});
+  const v=await r.json(); user.x=0.5; user.y=0.42; user.seen=performance.now()+6e5;
+  const s=handleVision({...v,faces:[]}); return {v,turn:s?await s:null};
+}
+async function simulateLeave(){
+  const r=await fetch('/vision/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leave:true})});
+  const v=await r.json(); user.seen=-1e9; handleVision({...v,faces:[]}); return v;
 }
 // one mirror at a time: a second tab listening to the same mic would transcribe every utterance twice and cancel its own turns
 const mirrorBus=new BroadcastChannel('aria-mirror');
-function stopMirror(){
-  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; micCtx?.close(); micCtx=null; micStatus('mic off — mirror running in another tab'); }
-  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; camOn=false; $('#camlbl').textContent='camera off — another tab took over'; }
-  $('#start').disabled=false; $('#start').textContent='▶ Start mirror (camera + mic + audio)';
-}
-mirrorBus.onmessage=e=>{ if(e.data==='claim') stopMirror(); };
-$('#start').onclick=async()=>{ $('#start').disabled=true; audio(); mirrorBus.postMessage('claim');
-  try{await startVAD();}catch(e){addChat('sys','mic denied: '+e);}
+function setRunning(on){ $('#start').disabled=on; $('#stopm').disabled=!on; $('#start').textContent=on?'● running':'▶ Start mirror'; }
+function releaseMirror(why){ stopVAD(); stopCam(); interrupt(why); runOn=false; mySession=null; setRunning(false); if(sleepTimer){clearTimeout(sleepTimer);sleepTimer=null;} sleep(); micStatus('mic off — mirror running in another tab'); }
+mirrorBus.onmessage=e=>{ if(e.data==='claim'&&(micStream||camOn)) releaseMirror('another tab started'); };
+$('#start').onclick=async()=>{ setRunning(true); audio(); mirrorBus.postMessage('claim');
+  await startRun(); setState('asleep');
+  try{await startVAD();}catch(e){addChat('sys','mic denied: '+e+' — type instead');}
   try{await startCam();}catch(e){addChat('sys','camera denied: '+e+' — use "Simulate approach"');}
-  $('#start').textContent='● mirror running'; };
-$('#approach').onclick=()=>simulateApproach($('#who').value||'unknown',false);
-$('#snap').onclick=async()=>{ if(!camOn){addChat('sys','snapshot: start the mirror (camera) first');return;}
-  addChat('sys','snapshot — look at the camera, slight head turns…'); const frames=[]; for(let i=0;i<8;i++){ frames.push(grab(0.85,640)); await new Promise(r=>setTimeout(r,220)); }
-  const r=await fetch('/users/snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({frames})}); const j=await r.json();
-  addChat('sys',j.ok?(j.already?`already registered as ${j.display} (match ${j.confidence})`:`registered as ${j.display} (${j.samples} samples, runtime memory only)`):'snapshot failed: '+j.error); };
-$('#auto').onchange=e=>fetch('/users/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:e.target.checked})});
-$('#ureset').onclick=async()=>{ await fetch('/users/reset',{method:'POST'}); addChat('sys','all users forgotten'); };
+  addChat('sys',`run session ${V.session} started — she greets each person once, then listens`); refreshUsers(); };
+$('#stopm').onclick=async()=>{ stopVAD(); stopCam(); interrupt('mirror stopped'); runOn=false; mySession=null; setRunning(false);
+  await fetch('/session/stop',{method:'POST'}); handledVisits.clear(); Object.assign(V,{identity:'unknown',confidence:null,others:0,session:null,visit:null,display:'—'});
+  if(sleepTimer){clearTimeout(sleepTimer);sleepTimer=null;} sleep(); showVision({present:false,session:null,faces:[]}); addChat('sys','mirror stopped — greetings, guests and conversations forgotten'); refreshUsers(); };
+$('#approach').onclick=()=>simulateApproach($('#who').value||'unknown');
+$('#leave').onclick=()=>simulateLeave();
+async function snapshot(role){
+  if(!camOn){addChat('sys','snapshot: press Start (camera) first');return;}
+  addChat('sys',`snapshot as ${role} — look at the camera, slight head turns…`); const frames=[]; for(let i=0;i<8;i++){ frames.push(await grab(0.85,640)); await sleepMs(220); }
+  const r=await fetch('/users/snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({frames,role})}); const j=await r.json();
+  addChat('sys',j.ok?(j.already?`already known as ${j.display}${j.confidence?' (match '+j.confidence+')':''}`:`remembered as ${j.display} (${j.samples} samples, memory only)${j.was?' — was '+j.was:''}`):'snapshot: '+j.error);
+  refreshUsers();
+}
+$('#snapu').onclick=()=>snapshot('user');
+$('#ureset').onclick=async()=>{ await fetch('/users/reset',{method:'POST'}); addChat('sys','all users forgotten'); refreshUsers(); };
 $('#stop').onclick=()=>interrupt('button');
-$('#reset').onclick=()=>{interrupt('reset'); fetch('/reset',{method:'POST'}); $('#chat').innerHTML='';};
-$('#txt').onkeydown=e=>{ if(e.key==='Enter'&&e.target.value.trim()){ audio(); if(!awake){awake=true;setState('listening');} send(e.target.value.trim());e.target.value='';} };
+$('#reset').onclick=()=>{interrupt('reset'); fetch('/reset',{method:'POST'}).then(refreshUsers); $('#chat').innerHTML='';};
+$('#txt').onkeydown=e=>{ if(e.key==='Enter'&&e.target.value.trim()){ audio(); if(!awake) wake(); send(e.target.value.trim());e.target.value='';} };
 $('#txt').oninput=()=>{ if(items.length||streaming) interrupt('typing'); };
-refreshUsers();
 
+// ═══════════════════════════ scenarios: scripted approaches through the same visit + chat path, expected vs actual ═══════════════════════════
+let sendCount=0; const _send=send; send=async(...a)=>{ sendCount++; return _send(...a); };
+const low=s=>(s||'').toLowerCase();
+async function firstUser(){ const j=await (await fetch('/users')).json(); const k=Object.keys(j.users)[0]; if(k) return {id:k,display:j.users[k].display};
+  const r=await (await fetch('/users/simulate',{method:'POST'})).json(); return {id:r.identity,display:r.display}; }
+async function approach(id){ const r=await simulateApproach(id); await waitSilence(); return {kind:r.v.greet?.kind||null,identity:r.v.identity,display:r.v.display,text:r.turn?.text||'',tools:(r.turn?.tools||[]).map(t=>t.name)}; }
+async function leave(){ await simulateLeave(); await sleepMs(300); }
+async function say(text){ const s=await send(text); await waitSilence(); return {text:s.text,tools:s.tools.map(t=>t.name),interrupted:s.interrupted}; }
+const SCEN=[
+  {id:'greet_listen',title:'Greets first, then listens',desc:'User 1 approaches: one greeting, then silence until spoken to; a question gets an answer, no tools.',say:'(approach) … 4 s silence … "How far away is the moon?"',
+   run:async c=>{ const u=await firstUser(); const g=await approach(u.id);
+     c('first approach is a greeting',g.kind==='greet',g.kind); c('greeting spoken, no tool',!!g.text&&!g.tools.length,g.text);
+     const n=sendCount; await sleepMs(4000); c('stays quiet while waiting for the visitor',sendCount===n&&!speaking(),`${sendCount-n} extra turns`);
+     const a=await say('How far away is the moon?'); c('answers, no tool',!!a.text&&!a.tools.length,a.text); }},
+  {id:'return',title:'Turns away and comes back',desc:'Greeted once per run session; on return only "Anything I can do for you?".',say:'(approach) → (leave) → (approach)',
+   run:async c=>{ const u=await firstUser(); const g=await approach(u.id); c('greeted on first approach',g.kind==='greet',g.text);
+     await leave(); const r=await approach(u.id);
+     c('no second greeting',r.kind==='return',r.kind); c('says "anything I can do for you?"',low(r.text).includes('anything i can do for you'),r.text); }},
+  {id:'user_guest_user',title:'User 1 → guest → User 1',desc:'A guest is not User 1 and is greeted as a guest; User 1 coming back is recognized and not greeted again; a guest is greeted on every approach.',say:'user → leave → new guest → leave → user → leave → guest',
+   run:async c=>{ const u=await firstUser(); const a=await approach(u.id); c(`${u.display} greeted`,a.kind==='greet'&&a.identity===u.id,a.text); await leave();
+     const g=await approach('unknown'); c('new face is a guest, not '+u.display,g.identity!==u.id&&/^guest/.test(g.identity),g.identity); c('guest gets a greeting',g.kind==='greet',g.text);
+     c('guest is not called '+u.display,!low(g.text).includes(low(u.display)),g.text); await leave();
+     const b=await approach(u.id); c(`${u.display} recognized again, not greeted twice`,b.kind==='return'&&b.identity===u.id,b.kind);
+     c('"welcome back, '+u.display+'"',low(b.text).includes('welcome back')&&low(b.text).includes(low(u.display)),b.text); await leave();
+     const g2=await approach(g.identity); c('the guest is greeted again (guests are never remembered)',g2.kind==='greet'&&/^guest/.test(g2.identity),g2.kind+' '+g2.text); }},
+  {id:'music',title:'Music request, then goodbye',desc:'A house request calls home_action (mock); "that is all" gets a short goodbye, no tool.',say:'"Play some Frank Sinatra in the living room" → "Thanks, that is all"',
+   run:async c=>{ const u=await firstUser(); await approach(u.id);
+     const a=await say('Play some Frank Sinatra in the living room'); c('calls home_action',a.tools.includes('home_action'),a.tools.join(',')||a.text);
+     const b=await say('Thanks, that is all'); c('goodbye without a tool',!b.tools.length&&!!b.text,b.text); }},
+  {id:'guest_privacy',title:'Guest privacy',desc:'A guest asks to be remembered: no preference is stored for an unregistered face.',say:'(new guest) "Please remember that I like jazz"',
+   run:async c=>{ const g=await approach('unknown'); c('greeted as a guest',g.kind==='greet'&&/^guest/.test(g.identity),g.identity);
+     const a=await say('Please remember that I like jazz'); c('no remember_preference for a guest',!a.tools.includes('remember_preference'),a.tools.join(',')||'none');
+     c('does not claim she remembered it',!/\b(noted|i'?ll remember|i will remember|i'?ve remembered|i have remembered|saved)\b/i.test(a.text),a.text); }},
+  {id:'interrupt',title:'Barge-in',desc:'Talking over her stops the audio within 60 ms; the next request still works.',say:'"Tell me a long story about the sea" … interrupt after 1.2 s … "Turn on the kitchen lights"',
+   run:async c=>{ const u=await firstUser(); await approach(u.id);
+     const p=send('Tell me a long story about the sea'); const t0=performance.now(); while(!speaking()&&performance.now()-t0<20000) await sleepMs(50);
+     await sleepMs(1200); const ms=interrupt('scenario barge-in'); await p; c('audio stopped ≤ 60 ms',ms!=null&&ms<=60,ms==null?'was not speaking':ms+' ms');
+     const a=await say('Turn on the kitchen lights'); c('next request calls home_action',a.tools.includes('home_action'),a.tools.join(',')||a.text); }},
+];
+function renderScen(){
+  $('#scen').innerHTML=`<div style="display:flex;gap:6px"><button class=sm id=runall>▶ Run all</button><small style="align-self:center">uses simulated approaches; the camera is paused while a scenario runs</small></div>`+
+    SCEN.map(s=>`<div class=sc id="sc_${s.id}"><div class=hd><div><b>${esc(s.title)}</b><i>${esc(s.desc)}</i><span class=say>${esc(s.say)}</span></div><button class=sm data-run="${s.id}">Run</button></div><div class=res></div></div>`).join('');
+  $('#scen').querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>runScenario(SCEN.find(s=>s.id===b.dataset.run)));
+  $('#runall').onclick=async()=>{ for(const s of SCEN) await runScenario(s); };
+}
+async function runScenario(s){
+  if(scenarioOn) return; scenarioOn=true; const box=$(`#sc_${s.id} .res`); box.innerHTML='running…'; $('#scen').querySelectorAll('button').forEach(b=>b.disabled=true);
+  const checks=[]; const c=(what,ok,got)=>{ checks.push({what,ok:!!ok,got:String(got??'').slice(0,160)}); box.innerHTML=checks.map(x=>`<span class=${x.ok?'pass':'fail'}>${x.ok?'✓':'✗'}</span> ${esc(x.what)} — <small>${esc(x.got)}</small>`).join('\n'); };
+  try{ interrupt('scenario'); await startRun(); addChat('sys',`▶ scenario: ${s.title} (fresh run session ${V.session})`); await s.run(c); }
+  catch(e){ c('scenario error',false,e.message||e); }
+  finally{ await waitSilence(); await simulateLeave().catch(()=>{}); scenarioOn=false; $('#scen').querySelectorAll('button').forEach(b=>b.disabled=false); }
+  const ok=checks.length&&checks.every(x=>x.ok); box.insertAdjacentHTML('afterbegin',`<b class=${ok?'pass':'fail'}>${ok?'PASS':'FAIL'}</b>\n`);
+  fetch('/scenarios/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:ok?'pass':'fail',scenario:s.id,checks})});
+  refreshUsers(); return ok;
+}
+renderScen(); refreshUsers(); showVision({present:false,session:null}); fit();
 </script></body></html>

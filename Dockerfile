@@ -21,6 +21,8 @@ RUN mkdir -p /app/models && cd /app/models \
     && curl -fsSL --retry 3 -o voices-v1.0.bin $K/voices-v1.0.bin \
     && curl -fsSL --retry 3 -o yunet.onnx $Z/face_detection_yunet/face_detection_yunet_2023mar.onnx \
     && curl -fsSL --retry 3 -o sface.onnx $Z/face_recognition_sface/face_recognition_sface_2021dec.onnx \
+    && curl -fsSL --retry 3 -o silero_vad.onnx https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx \
+    && echo "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f  silero_vad.onnx" | sha256sum -c - \
     && for f in kokoro-v1.0.int8.onnx voices-v1.0.bin sface.onnx; do \
          [ "$(stat -c %s $f)" -gt 1000000 ] || { echo "$f too small"; exit 1; }; done \
     && [ "$(stat -c %s yunet.onnx)" -gt 100000 ] || { echo "yunet.onnx too small"; exit 1; }
